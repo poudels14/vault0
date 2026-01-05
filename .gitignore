@@ -1,0 +1,59 @@
+lib/vault0.h
+build
+
+# Claude Code
+.claude/
+
+# node
+node_modules
+
+# Ruby
+vendor/bundle
+.bundle
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Xcode
+DerivedData/
+xcuserdata
+.build/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Application data
+.vault0/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
