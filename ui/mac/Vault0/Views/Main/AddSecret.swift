@@ -58,12 +58,17 @@ struct AddSecretDialog: View {
                         Text(key)
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(.vault0TextPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12)
                             .background(Color.vault0Surface)
                             .cornerRadius(8)
                     } else {
                         TextField("e.g., DATABASE_URL", text: $key)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(minWidth: 0, maxWidth: .infinity)
                             .customTextField(isError: keyError != nil)
                             .onChange(of: key) { newValue in
                                 validateKey(newValue)
@@ -85,14 +90,43 @@ struct AddSecretDialog: View {
                     Text("Value")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.vault0TextSecondary)
-                    HStack(spacing: 8) {
-                        if showValue {
-                            TextField("Enter value", text: $value)
-                                .customTextField()
-                        } else {
-                            SecureField("Enter value", text: $value)
-                                .customTextField()
+                    HStack(alignment: .top, spacing: 8) {
+                        Group {
+                            if showValue {
+                                ZStack(alignment: .topLeading) {
+                                    if value.isEmpty {
+                                        Text("Enter value")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.vault0TextTertiary)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 14)
+                                            .allowsHitTesting(false)
+                                    }
+
+                                    TextEditor(text: $value)
+                                        .font(.system(size: 13, design: .monospaced))
+                                        .foregroundColor(.vault0TextPrimary)
+                                        .scrollContentBackground(.hidden)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 6)
+                                }
+                                .frame(height: 96)
+                                .background(Color.vault0Background)
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.vault0Border, lineWidth: 1),
+                                )
+                            } else {
+                                SecureField("Enter value", text: $value)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .customTextField()
+                                    .padding(.top, 2)
+                            }
                         }
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .layoutPriority(1)
                         Button(action: { showValue.toggle() }) {
                             Image(systemName: showValue ? "eye.slash" : "eye")
                                 .font(.system(size: 13))
@@ -131,7 +165,7 @@ struct AddSecretDialog: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 480, height: 420)
         .background(Color.vault0Background)
     }
 

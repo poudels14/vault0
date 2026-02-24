@@ -323,6 +323,8 @@ struct SecretRow: View {
                     Text(secret.key)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.vault0TextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Text(formattedUpdatedDate(secret.updatedDate))
@@ -337,7 +339,6 @@ struct SecretRow: View {
                     Text(secret.value)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.vault0TextSecondary)
-                        .textSelection(.enabled)
                 } else {
                     Text(String(repeating: "•", count: 18))
                         .font(.system(size: 14, weight: .medium))
@@ -455,6 +456,8 @@ struct MissingSecretRow: View {
                     Text(key)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.vault0TextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Text("Missing in \(environment)")
@@ -507,6 +510,14 @@ struct EditSecretSheet: View {
     @State private var showValue: Bool = false
     @Environment(\.dismiss) var dismiss
 
+    private var maskedPreviewText: String {
+        if value.isEmpty {
+            return "Enter value"
+        }
+        let bulletCount = min(max(value.count, 24), 240)
+        return String(repeating: "•", count: bulletCount)
+    }
+
     init(secretKey: String, currentValue: String, onSave: @escaping (String) -> Void) {
         self.secretKey = secretKey
         self.currentValue = currentValue
@@ -546,6 +557,8 @@ struct EditSecretSheet: View {
                     Text(secretKey)
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundColor(.vault0TextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
                         .background(Color.vault0Surface)
@@ -556,14 +569,53 @@ struct EditSecretSheet: View {
                     Text("Value")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.vault0TextSecondary)
-                    HStack(spacing: 8) {
-                        if showValue {
-                            TextField("Enter value", text: $value)
-                                .customTextField()
-                        } else {
-                            SecureField("Enter value", text: $value)
-                                .customTextField()
+                    HStack(alignment: .top, spacing: 8) {
+                        Group {
+                            if showValue {
+                                ZStack(alignment: .topLeading) {
+                                    if value.isEmpty {
+                                        Text("Enter value")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.vault0TextTertiary)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 14)
+                                            .allowsHitTesting(false)
+                                    }
+
+                                    TextEditor(text: $value)
+                                        .font(.system(size: 13, design: .monospaced))
+                                        .foregroundColor(.vault0TextPrimary)
+                                        .scrollContentBackground(.hidden)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 6)
+                                }
+                                .frame(height: 96)
+                                .background(Color.vault0Background)
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.vault0Border, lineWidth: 1),
+                                )
+                            } else {
+                                Text(maskedPreviewText)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .foregroundColor(value.isEmpty ? .vault0TextTertiary : .vault0TextSecondary)
+                                    .lineLimit(4)
+                                    .truncationMode(.tail)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 10)
+                                    .frame(height: 96)
+                                    .background(Color.vault0Background)
+                                    .cornerRadius(8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.vault0Border, lineWidth: 1),
+                                    )
+                            }
                         }
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .layoutPriority(1)
                         Button(action: { showValue.toggle() }) {
                             Image(systemName: showValue ? "eye.slash" : "eye")
                                 .font(.system(size: 13))
@@ -603,7 +655,7 @@ struct EditSecretSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 340)
+        .frame(width: 480, height: 420)
         .background(Color.vault0Background)
     }
 }

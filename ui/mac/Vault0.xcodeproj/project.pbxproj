@@ -453,7 +453,7 @@
 					"$(PROJECT_DIR)/../../lib/target/debug",
 				);
 				MARKETING_VERSION = 0.1.0;
-				OTHER_LINKER_FLAGS = "-lvault0";
+				OTHER_LINKER_FLAGS = "-lvault0 -lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.vault0.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -489,7 +489,7 @@
 					"$(PROJECT_DIR)/../../lib/target/release",
 				);
 				MARKETING_VERSION = 0.1.0;
-				OTHER_LINKER_FLAGS = "-lvault0";
+				OTHER_LINKER_FLAGS = "-lvault0 -lsqlite3";
 				PRODUCT_BUNDLE_IDENTIFIER = dev.vault0.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

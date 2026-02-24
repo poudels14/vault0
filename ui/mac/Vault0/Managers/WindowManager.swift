@@ -36,6 +36,7 @@ class WindowManager: ObservableObject {
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
 
         onboardingWindow = window
     }
@@ -57,6 +58,7 @@ class WindowManager: ObservableObject {
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
 
         loginWindow = window
     }
@@ -78,6 +80,7 @@ class WindowManager: ObservableObject {
         window.center()
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
 
         lockScreenWindow = window
     }
@@ -105,6 +108,7 @@ class WindowManager: ObservableObject {
         window.delegate = mainWindowDelegate
 
         window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
 
         mainWindow = window
     }
