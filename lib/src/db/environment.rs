@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use diesel::prelude::*;
 use diesel::sql_query;
-use diesel::sql_types::{BigInt, Text};
+use diesel::sql_types::{BigInt, Binary, Text};
 use uuid::Uuid;
 
 use crate::models::EnvironmentResponse;
@@ -80,6 +80,74 @@ pub fn create(vault_id: &str, name: &str) -> Result<()> {
   .bind::<BigInt, _>(now)
   .bind::<BigInt, _>(max_order + 1)
   .execute(&mut conn)?;
+
+  Ok(())
+}
+
+pub fn clone(vault_id: &str, source_name: &str, new_name: &str) -> Result<()> {
+  create(vault_id, new_name)?;
+
+  #[derive(QueryableByName)]
+  struct SecretCopyRow {
+    #[diesel(sql_type = Binary)]
+    encrypted_key: Vec<u8>,
+    #[diesel(sql_type = Binary)]
+    encrypted_value: Vec<u8>,
+    #[diesel(sql_type = Binary)]
+    key_nonce: Vec<u8>,
+    #[diesel(sql_type = Binary)]
+    value_nonce: Vec<u8>,
+  }
+
+  let mut conn = super::conn()?;
+
+  let rows: Vec<SecretCopyRow> = sql_query(
+    "SELECT encrypted_key, encrypted_value, key_nonce, value_nonce FROM secrets WHERE vault_id = ? AND environment = ?",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(source_name)
+  .load(&mut conn)?;
+
+  let now = chrono::Utc::now().timestamp();
+
+  for row in rows {
+    let key_nonce_array: [u8; 12] = row
+      .key_nonce
+      .as_slice()
+      .try_into()
+      .map_err(|_| anyhow::anyhow!("Invalid key nonce"))?;
+    let value_nonce_array: [u8; 12] = row
+      .value_nonce
+      .as_slice()
+      .try_into()
+      .map_err(|_| anyhow::anyhow!("Invalid value nonce"))?;
+
+    let id = Uuid::new_v4().to_string();
+
+    sql_query(
+      "INSERT INTO secrets (id, vault_id, environment, encrypted_key, encrypted_value, key_nonce, value_nonce, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind::<Text, _>(&id)
+    .bind::<Text, _>(vault_id)
+    .bind::<Text, _>(new_name)
+    .bind::<Binary, _>(&row.encrypted_key)
+    .bind::<Binary, _>(&row.encrypted_value)
+    .bind::<Binary, _>(key_nonce_array.as_slice())
+    .bind::<Binary, _>(value_nonce_array.as_slice())
+    .bind::<BigInt, _>(now)
+    .bind::<BigInt, _>(now)
+    .execute(&mut conn)?;
+
+    let _ = super::api_key::sync_secret(
+      &id,
+      vault_id,
+      new_name,
+      &row.encrypted_key,
+      &key_nonce_array,
+      &row.encrypted_value,
+      &value_nonce_array,
+    );
+  }
 
   Ok(())
 }

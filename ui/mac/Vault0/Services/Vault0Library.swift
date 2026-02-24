@@ -211,6 +211,16 @@ class Vault0Library {
         }
     }
 
+    func cloneEnvironment(vaultId: String, sourceName: String, newName: String) -> Bool {
+        vaultId.withCString { vId in
+            sourceName.withCString { src in
+                newName.withCString { dst in
+                    vault0_clone_environment(vId, src, dst)
+                }
+            }
+        }
+    }
+
     func startServer() -> Bool {
         let result = vault0_server_start()
         NSLog(result ? "Server started successfully" : "Failed to start server")

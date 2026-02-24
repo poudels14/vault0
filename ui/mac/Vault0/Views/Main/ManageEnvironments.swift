@@ -11,6 +11,9 @@ struct ManageEnvironmentsDialog: View {
     @State private var validationError: String?
     @State private var showingDeleteAlert = false
     @State private var environmentToDelete: String?
+    @State private var cloningFrom: String?
+    @State private var cloneNewName = ""
+    @State private var cloneError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,45 +38,96 @@ struct ManageEnvironmentsDialog: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Add Environment")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.vault0TextSecondary)
+            if let source = cloningFrom {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Clone \"\(source.capitalized)\" as")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.vault0TextSecondary)
 
-                HStack(spacing: 8) {
-                    TextField("e.g., staging", text: $newEnvironmentName)
-                        .customTextField(isError: validationError != nil)
-                        .onSubmit(addEnvironment)
-                        .onChange(of: newEnvironmentName) { _ in
-                            validationError = nil
+                    HStack(spacing: 8) {
+                        TextField("New environment name", text: $cloneNewName)
+                            .customTextField(isError: cloneError != nil)
+                            .onSubmit(performClone)
+                            .onChange(of: cloneNewName) { _ in cloneError = nil }
+
+                        Button(action: performClone) {
+                            Text("Clone")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(cloneNewName.trimmingCharacters(in: .whitespaces).isEmpty ? Color.vault0TextTertiary : Color.vault0Accent)
+                                .cornerRadius(8)
                         }
+                        .buttonStyle(.plain)
+                        .disabled(cloneNewName.trimmingCharacters(in: .whitespaces).isEmpty)
 
-                    Button(action: addEnvironment) {
-                        Text("Add")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(newEnvironmentName.trimmingCharacters(in: .whitespaces).isEmpty ? Color.vault0TextTertiary : Color.vault0Accent)
-                            .cornerRadius(8)
+                        Button(action: {
+                            cloningFrom = nil
+                            cloneNewName = ""
+                            cloneError = nil
+                        }) {
+                            Text("Cancel")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.vault0TextSecondary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(newEnvironmentName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
 
-                if let error = validationError {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 11))
-                        Text(error)
-                            .font(.system(size: 11))
+                    if let error = cloneError {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text(error)
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(.vault0Error)
                     }
-                    .foregroundColor(.vault0Error)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Add Environment")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.vault0TextSecondary)
+
+                    HStack(spacing: 8) {
+                        TextField("e.g., staging", text: $newEnvironmentName)
+                            .customTextField(isError: validationError != nil)
+                            .onSubmit(addEnvironment)
+                            .onChange(of: newEnvironmentName) { _ in
+                                validationError = nil
+                            }
+
+                        Button(action: addEnvironment) {
+                            Text("Add")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(newEnvironmentName.trimmingCharacters(in: .whitespaces).isEmpty ? Color.vault0TextTertiary : Color.vault0Accent)
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newEnvironmentName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+
+                    if let error = validationError {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text(error)
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(.vault0Error)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
 
             Divider()
                 .padding(.horizontal, 20)
@@ -108,6 +162,19 @@ struct ManageEnvironmentsDialog: View {
 
                                     Spacer()
 
+                                    Button(action: {
+                                        cloningFrom = env
+                                        cloneNewName = "\(env)-copy"
+                                        cloneError = nil
+                                        validationError = nil
+                                    }) {
+                                        Image(systemName: "doc.on.doc")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.vault0TextSecondary)
+                                            .frame(width: 24, height: 24)
+                                    }
+                                    .buttonStyle(.plain)
+
                                     if environments.count > 1 {
                                         TrashButton {
                                             environmentToDelete = env
@@ -128,7 +195,7 @@ struct ManageEnvironmentsDialog: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 500, height: 340)
+        .frame(width: 500, height: 360)
         .background(Color.vault0Background)
         .alert("Delete Environment", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) {}
@@ -164,6 +231,31 @@ struct ManageEnvironmentsDialog: View {
             onChanged()
         } else {
             validationError = "Failed to create"
+        }
+    }
+
+    private func performClone() {
+        guard let source = cloningFrom else { return }
+        let trimmed = cloneNewName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        if trimmed.contains(" ") {
+            cloneError = "No spaces allowed"
+            return
+        }
+
+        if environments.contains(trimmed.lowercased()) {
+            cloneError = "Already exists"
+            return
+        }
+
+        if Vault0Library.shared.cloneEnvironment(vaultId: vaultId, sourceName: source, newName: trimmed) {
+            cloningFrom = nil
+            cloneNewName = ""
+            cloneError = nil
+            onChanged()
+        } else {
+            cloneError = "Failed to clone"
         }
     }
 

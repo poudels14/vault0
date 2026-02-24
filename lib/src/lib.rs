@@ -379,6 +379,38 @@ pub extern "C" fn vault0_delete_environment(
 }
 
 #[no_mangle]
+pub extern "C" fn vault0_clone_environment(
+  vault_id: *const c_char,
+  source_name: *const c_char,
+  new_name: *const c_char,
+) -> bool {
+  unsafe {
+    let vault_id_str = match CStr::from_ptr(vault_id).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    let source_str = match CStr::from_ptr(source_name).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    let new_str = match CStr::from_ptr(new_name).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    match db::environment::clone(vault_id_str, source_str, new_str) {
+      Ok(_) => true,
+      Err(e) => {
+        eprintln!("{}", e);
+        false
+      }
+    }
+  }
+}
+
+#[no_mangle]
 pub extern "C" fn vault0_free_string(s: *mut c_char) {
   unsafe {
     if !s.is_null() {
