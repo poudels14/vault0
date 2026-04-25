@@ -290,6 +290,7 @@ struct SecretRow: View {
     @State private var copiedValue: String? = nil
     @State private var isHovering = false
     @State private var showCopiedFeedback = false
+    @State private var showKeyCopiedFeedback = false
 
     private func formattedUpdatedDate(_ date: Date) -> String {
         let interval = Date().timeIntervalSince(date)
@@ -316,7 +317,7 @@ struct SecretRow: View {
     var body: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Circle()
                         .fill(Color.vault0Success)
                         .frame(width: 6, height: 6)
@@ -325,6 +326,19 @@ struct SecretRow: View {
                         .foregroundColor(.vault0TextPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .textSelection(.enabled)
+
+                    Button(action: { copyKeyToClipboard(secret.key) }) {
+                        Image(systemName: showKeyCopiedFeedback ? "checkmark" : "square.on.square")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(showKeyCopiedFeedback ? .vault0Success : .vault0TextTertiary)
+                            .frame(width: 18, height: 14)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy key")
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
                 }
 
                 Text(formattedUpdatedDate(secret.updatedDate))
@@ -407,6 +421,20 @@ struct SecretRow: View {
         .onDisappear {
             clipboardTimer?.invalidate()
             clipboardTimer = nil
+        }
+    }
+
+    private func copyKeyToClipboard(_ key: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(key, forType: .string)
+
+        withAnimation {
+            showKeyCopiedFeedback = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation {
+                showKeyCopiedFeedback = false
+            }
         }
     }
 
@@ -559,6 +587,7 @@ struct EditSecretSheet: View {
                         .foregroundColor(.vault0TextPrimary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
                         .background(Color.vault0Surface)
