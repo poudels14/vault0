@@ -417,6 +417,7 @@ async fn run_command(command: &[String]) -> Result<()> {
     let vault_selection = Select::new()
         .with_prompt("Select vault")
         .items(&vault_names)
+        .default(0)
         .interact()?;
 
     let selected_vault = &vaults[vault_selection];
@@ -433,6 +434,7 @@ async fn run_command(command: &[String]) -> Result<()> {
     let env_selection = Select::new()
         .with_prompt("Select environment")
         .items(&env_names)
+        .default(0)
         .interact()?;
 
     let selected_env = &env_names[env_selection];
