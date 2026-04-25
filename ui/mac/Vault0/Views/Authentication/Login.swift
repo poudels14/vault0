@@ -112,7 +112,9 @@ struct LoginView: View {
         .frame(minHeight: 420)
         .padding(32)
         .onAppear {
-            if !canUseBiometric {
+            if canUseBiometric, !showPasswordField {
+                unlockWithBiometric()
+            } else {
                 isPasswordFocused = true
             }
         }
