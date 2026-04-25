@@ -62,7 +62,7 @@ bundle exec rake release
 The built app will be at:
 
 ```
-~/Library/Developer/Xcode/DerivedData/Vault0-*/Build/Products/Release/Vault0.app
+build/release/Vault0.app
 ```
 
 This task builds the Rust library in release mode, regenerates the C header, and runs `xcodebuild` against the `Vault0` scheme with the `Release` configuration.

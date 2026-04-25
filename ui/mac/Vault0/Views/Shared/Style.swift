@@ -1,7 +1,7 @@
 import SwiftUI
 
 extension Color {
-    // Primary accent - refined blue
+    /// Primary accent - refined blue
     static let vault0Accent = Color(red: 0.22, green: 0.47, blue: 0.96)
 
     // Semantic colors

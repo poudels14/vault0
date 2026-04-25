@@ -36,6 +36,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("Vault0 started successfully")
     }
 
+    func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            openMainWindow()
+        }
+        return true
+    }
+
     func applicationWillTerminate(_: Notification) {
         for monitor in activityMonitors {
             NSEvent.removeMonitor(monitor)

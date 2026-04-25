@@ -124,7 +124,9 @@ enum ApiKeyExpiration: Int32, CaseIterable, Identifiable {
     case ninetyDays = 90
     case noExpiry = -1
 
-    var id: Int32 { rawValue }
+    var id: Int32 {
+        rawValue
+    }
 
     var displayName: String {
         switch self {

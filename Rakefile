@@ -1,4 +1,5 @@
 require 'xcodeproj'
+require 'fileutils'
 
 RUST_LIB_DIR = File.expand_path('lib', __dir__)
 RUST_CLI_DIR = File.expand_path('cli', __dir__)
@@ -118,14 +119,22 @@ end
 desc 'Build complete macOS app (release build)'
 task :release => [:build_rust_release, :generate_header] do
   puts 'Building macOS app (Release)...'
+  release_dir = File.expand_path('build/release', __dir__)
+  intermediates_dir = File.expand_path('build/intermediates', __dir__)
+  FileUtils.rm_rf(release_dir)
+  FileUtils.rm_rf(intermediates_dir)
   Dir.chdir(File.expand_path('ui/mac', __dir__)) do
-    sh 'xcodebuild -project Vault0.xcodeproj -scheme Vault0 -configuration Release clean build'
+    sh 'xcodebuild', '-project', 'Vault0.xcodeproj', '-scheme', 'Vault0',
+       '-configuration', 'Release',
+       "CONFIGURATION_BUILD_DIR=#{release_dir}",
+       "CONFIGURATION_TEMP_DIR=#{intermediates_dir}",
+       'build'
   end
   puts ''
   puts '✅ Release build complete!'
   puts ''
   puts 'Location:'
-  puts '  ~/Library/Developer/Xcode/DerivedData/Vault0-*/Build/Products/Release/Vault0.app'
+  puts "  #{File.join(release_dir, 'Vault0.app')}"
 end
 
 desc 'Format code (Rust + Swift)'
