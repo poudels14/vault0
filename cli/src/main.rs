@@ -167,6 +167,50 @@ impl VaultClient {
     }
 }
 
+async fn select_vault_and_env() -> Result<(VaultInfo, String)> {
+    let vaults = VaultClient::connect().await?.list_vaults().await?;
+    if vaults.is_empty() {
+        return Err(anyhow!("No vaults found."));
+    }
+
+    let vault_names: Vec<String> = vaults.iter().map(|v| v.name.clone()).collect();
+    let vault_selection = Select::new()
+        .with_prompt("Select vault")
+        .items(&vault_names)
+        .default(0)
+        .interact()?;
+    let selected_vault = vaults[vault_selection].clone();
+
+    let environments = VaultClient::connect()
+        .await?
+        .list_environments(&selected_vault.id)
+        .await?;
+    if environments.is_empty() {
+        return Err(anyhow!("No environments found."));
+    }
+
+    let env_names: Vec<String> = environments.iter().map(|e| e.name.clone()).collect();
+    let env_selection = Select::new()
+        .with_prompt("Select environment")
+        .items(&env_names)
+        .default(0)
+        .interact()?;
+
+    Ok((selected_vault, env_names[env_selection].clone()))
+}
+
+async fn select_and_load_secrets() -> Result<(VaultInfo, String, Vec<SecretEntry>)> {
+    let (vault, env) = select_vault_and_env().await?;
+    let master_password = Password::new()
+        .with_prompt("Enter master password")
+        .interact()?;
+    let secrets = VaultClient::connect()
+        .await?
+        .list_secrets(vault.id.clone(), env.clone(), master_password)
+        .await?;
+    Ok((vault, env, secrets))
+}
+
 fn decrypt_secret(dek: &[u8; 32], ciphertext: &[u8], nonce: &[u8]) -> Result<String> {
     let cipher =
         Aes256Gcm::new_from_slice(dek).map_err(|e| anyhow!("Failed to create cipher: {}", e))?;
@@ -269,41 +313,13 @@ async fn import_env_file(file_path: &str) -> Result<()> {
 
     eprintln!("Found {} variables", env_vars.len());
 
-    let vaults = VaultClient::connect().await?.list_vaults().await?;
-    if vaults.is_empty() {
-        return Err(anyhow!("No vaults found. Please create a vault first."));
-    }
-
-    let vault_names: Vec<String> = vaults.iter().map(|v| v.name.clone()).collect();
-    let vault_selection = Select::new()
-        .with_prompt("Select vault")
-        .items(&vault_names)
-        .interact()?;
-
-    let selected_vault = &vaults[vault_selection];
-
-    let environments = VaultClient::connect()
-        .await?
-        .list_environments(&selected_vault.id)
-        .await?;
-    if environments.is_empty() {
-        return Err(anyhow!(
-            "No environments found. Please create an environment first."
-        ));
-    }
-
-    let env_names: Vec<String> = environments.iter().map(|e| e.name.clone()).collect();
-    let env_selection = Select::new()
-        .with_prompt("Select environment")
-        .items(&env_names)
-        .interact()?;
+    let (selected_vault, selected_env) = select_vault_and_env().await?;
 
     let client = VaultClient::connect().await?;
-    let selected_env = &env_names[env_selection];
     let mut success_count = 0;
     for (key, value) in env_vars {
         match client
-            .create_secret(&selected_vault.id, selected_env, &key, &value)
+            .create_secret(&selected_vault.id, &selected_env, &key, &value)
             .await
         {
             Ok(_) => success_count += 1,
@@ -331,47 +347,7 @@ fn escape_env_value(value: &str) -> String {
 async fn export_env_file(file_path: &str) -> Result<()> {
     eprintln!("Exporting secrets to: {}", file_path);
 
-    let vaults = VaultClient::connect().await?.list_vaults().await?;
-    if vaults.is_empty() {
-        return Err(anyhow!("No vaults found."));
-    }
-
-    let vault_names: Vec<String> = vaults.iter().map(|v| v.name.clone()).collect();
-    let vault_selection = Select::new()
-        .with_prompt("Select vault")
-        .items(&vault_names)
-        .interact()?;
-
-    let selected_vault = &vaults[vault_selection];
-
-    let environments = VaultClient::connect()
-        .await?
-        .list_environments(&selected_vault.id)
-        .await?;
-    if environments.is_empty() {
-        return Err(anyhow!("No environments found."));
-    }
-
-    let env_names: Vec<String> = environments.iter().map(|e| e.name.clone()).collect();
-    let env_selection = Select::new()
-        .with_prompt("Select environment")
-        .items(&env_names)
-        .interact()?;
-
-    let selected_env = &env_names[env_selection];
-
-    let master_password = Password::new()
-        .with_prompt("Enter master password")
-        .interact()?;
-
-    let client = VaultClient::connect().await?;
-    let secrets = client
-        .list_secrets(
-            selected_vault.id.clone(),
-            selected_env.clone(),
-            master_password.clone(),
-        )
-        .await?;
+    let (_selected_vault, selected_env, secrets) = select_and_load_secrets().await?;
 
     if secrets.is_empty() {
         eprintln!("No secrets found in environment '{}'", selected_env);
@@ -421,49 +397,7 @@ async fn run_command(command: &[String]) -> Result<()> {
         return Err(anyhow!("No command specified"));
     }
 
-    let vaults = VaultClient::connect().await?.list_vaults().await?;
-    if vaults.is_empty() {
-        return Err(anyhow!("No vaults found."));
-    }
-
-    let vault_names: Vec<String> = vaults.iter().map(|v| v.name.clone()).collect();
-    let vault_selection = Select::new()
-        .with_prompt("Select vault")
-        .items(&vault_names)
-        .default(0)
-        .interact()?;
-
-    let selected_vault = &vaults[vault_selection];
-
-    let environments = VaultClient::connect()
-        .await?
-        .list_environments(&selected_vault.id)
-        .await?;
-    if environments.is_empty() {
-        return Err(anyhow!("No environments found."));
-    }
-
-    let env_names: Vec<String> = environments.iter().map(|e| e.name.clone()).collect();
-    let env_selection = Select::new()
-        .with_prompt("Select environment")
-        .items(&env_names)
-        .default(0)
-        .interact()?;
-
-    let selected_env = &env_names[env_selection];
-
-    let master_password = Password::new()
-        .with_prompt("Enter master password")
-        .interact()?;
-
-    let client = VaultClient::connect().await?;
-    let secrets = client
-        .list_secrets(
-            selected_vault.id.clone(),
-            selected_env.clone(),
-            master_password,
-        )
-        .await?;
+    let (selected_vault, selected_env, secrets) = select_and_load_secrets().await?;
 
     eprintln!(
         "Running with {} secrets from '{}/{}'",
@@ -484,47 +418,7 @@ async fn run_command(command: &[String]) -> Result<()> {
 }
 
 async fn open_shell() -> Result<()> {
-    let vaults = VaultClient::connect().await?.list_vaults().await?;
-    if vaults.is_empty() {
-        return Err(anyhow!("No vaults found."));
-    }
-
-    let vault_names: Vec<String> = vaults.iter().map(|v| v.name.clone()).collect();
-    let vault_selection = Select::new()
-        .with_prompt("Select vault")
-        .items(&vault_names)
-        .interact()?;
-
-    let selected_vault = &vaults[vault_selection];
-
-    let environments = VaultClient::connect()
-        .await?
-        .list_environments(&selected_vault.id)
-        .await?;
-    if environments.is_empty() {
-        return Err(anyhow!("No environments found."));
-    }
-
-    let env_names: Vec<String> = environments.iter().map(|e| e.name.clone()).collect();
-    let env_selection = Select::new()
-        .with_prompt("Select environment")
-        .items(&env_names)
-        .interact()?;
-
-    let selected_env = &env_names[env_selection];
-
-    let master_password = Password::new()
-        .with_prompt("Enter master password")
-        .interact()?;
-
-    let client = VaultClient::connect().await?;
-    let secrets = client
-        .list_secrets(
-            selected_vault.id.clone(),
-            selected_env.clone(),
-            master_password,
-        )
-        .await?;
+    let (selected_vault, selected_env, secrets) = select_and_load_secrets().await?;
 
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
