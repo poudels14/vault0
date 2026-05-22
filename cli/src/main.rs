@@ -319,6 +319,15 @@ async fn import_env_file(file_path: &str) -> Result<()> {
     Ok(())
 }
 
+fn escape_env_value(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('$', "\\$")
+        .replace('`', "\\`");
+    format!("\"{}\"", escaped)
+}
+
 async fn export_env_file(file_path: &str) -> Result<()> {
     eprintln!("Exporting secrets to: {}", file_path);
 
@@ -371,7 +380,11 @@ async fn export_env_file(file_path: &str) -> Result<()> {
 
     let mut content = String::new();
     for secret in &secrets {
-        content.push_str(&format!("{}={}\n", secret.key, secret.value));
+        content.push_str(&format!(
+            "{}={}\n",
+            secret.key,
+            escape_env_value(&secret.value)
+        ));
     }
 
     std::fs::write(file_path, content).context("Failed to write .env file")?;
