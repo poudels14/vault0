@@ -372,7 +372,7 @@ struct SidebarEnvironmentSection: View {
             } else {
                 ForEach(environments, id: \.self) { env in
                     SidebarEnvironmentButton(
-                        title: env.capitalized,
+                        title: env,
                         isSelected: selectedEnvironment == env,
                         action: { selectedEnvironment = env },
                     )

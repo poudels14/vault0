@@ -40,7 +40,7 @@ struct ManageEnvironmentsDialog: View {
 
             if let source = cloningFrom {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Clone \"\(source.capitalized)\" as")
+                    Text("Clone \"\(source)\" as")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.vault0TextSecondary)
 
@@ -156,7 +156,7 @@ struct ManageEnvironmentsDialog: View {
                                         .font(.system(size: 12))
                                         .foregroundColor(.vault0Accent)
                                         .frame(width: 20)
-                                    Text(env.capitalized)
+                                    Text(env)
                                         .font(.system(size: 13))
                                         .foregroundColor(.vault0TextPrimary)
 
@@ -206,7 +206,7 @@ struct ManageEnvironmentsDialog: View {
             }
         } message: {
             if let env = environmentToDelete {
-                Text("Delete \"\(env.capitalized)\"? Secrets in this environment will not be deleted.")
+                Text("Delete \"\(env)\"? Secrets in this environment will not be deleted.")
             }
         }
     }
