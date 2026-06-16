@@ -37,6 +37,7 @@ struct ManageVaultsDialog: View {
                 } else if vaults.isEmpty {
                     emptyStateView
                 } else {
+                    vaultsHeader
                     vaultsListContent
                 }
             }
@@ -48,16 +49,43 @@ struct ManageVaultsDialog: View {
                     handleUpdateVault(id: vault.id, name: name, description: description)
                 })
             }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: { showingAddSheet = true }) {
-                        Label("Add Vault", systemImage: "plus")
-                    }
-                }
-            }
         }
-        .frame(width: 500, height: 400)
+        .frame(width: 620, height: 520)
         .background(Color.vault0Background)
+    }
+
+    private var vaultsHeader: some View {
+        HStack {
+            Text("Vaults")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.vault0TextSecondary)
+
+            Spacer()
+
+            Button(action: { showingAddSheet = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Add")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(.vault0Accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.vault0Accent.opacity(0.08)),
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.vault0Accent.opacity(0.15), lineWidth: 1),
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 
     private var emptyStateView: some View {
@@ -92,14 +120,21 @@ struct ManageVaultsDialog: View {
     }
 
     private var vaultsListContent: some View {
-        List(vaults) { vault in
-            VaultRow(vault: vault, onEdit: {
-                editingVault = vault
-            }, onDelete: {
-                deleteVault(vault)
-            })
+        ScrollView {
+            VStack(spacing: 4) {
+                ForEach(vaults) { vault in
+                    VaultRow(vault: vault, onEdit: {
+                        editingVault = vault
+                    }, onDelete: {
+                        deleteVault(vault)
+                    })
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
         }
-        .listStyle(.inset)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color.vault0Background)
     }
 
     private func handleCreateVault(name: String, description: String?) {
@@ -230,7 +265,9 @@ struct VaultRow: View {
             }
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 8)
+        .background(Color.vault0Surface)
+        .cornerRadius(6)
         .alert("Delete Vault", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive, action: onDelete)
