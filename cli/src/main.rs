@@ -10,14 +10,18 @@ use aes_gcm::{
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
 use clap::{Parser, Subcommand};
-use dialoguer::{Password, Select};
+use dialoguer::{Input, MultiSelect, Password, Select};
 use serde::{Deserialize, Serialize};
 use tarpc::{client, context};
 use tokio::net::UnixStream;
 use tokio_serde::formats::Bincode;
 use vault0::{
     models::ApiSecretPayload,
-    rpc::{EnvironmentInfo, ListSecretsRequest, SecretEntry, Vault0ServiceClient, VaultInfo},
+    rpc::{
+        EnvironmentInfo, ImportEnvironmentResolution, ImportPreview, ImportResolution,
+        ImportResult, ImportVaultResolution, ListSecretsRequest, SecretEntry, Vault0ServiceClient,
+        VaultInfo,
+    },
 };
 
 const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
@@ -57,6 +61,27 @@ enum Commands {
     ///
     /// Type 'exit' to return to your original shell
     Shell,
+    /// Manage vaults: list, or export/import as a password-encrypted file
+    Vaults {
+        #[command(subcommand)]
+        command: VaultsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum VaultsCommands {
+    /// List all vaults
+    Ls,
+    /// Export a vault (all environments and secrets) to an encrypted file
+    Export {
+        /// Path to write the encrypted export file to
+        file_path: String,
+    },
+    /// Import a vault from an encrypted file
+    Import {
+        /// Path to the encrypted export file to import
+        file_path: String,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -82,6 +107,17 @@ async fn main() -> Result<()> {
         Commands::Shell => {
             open_shell().await?;
         }
+        Commands::Vaults { command } => match command {
+            VaultsCommands::Ls => {
+                list_vaults().await?;
+            }
+            VaultsCommands::Export { file_path } => {
+                export_vault_file(file_path).await?;
+            }
+            VaultsCommands::Import { file_path } => {
+                import_vault_file(file_path).await?;
+            }
+        },
     }
     Ok(())
 }
@@ -162,6 +198,46 @@ impl VaultClient {
                     master_password,
                 },
             )
+            .await?
+            .map_err(|e| anyhow!("{}", e))
+    }
+
+    async fn export_vaults(
+        &self,
+        vault_ids: Vec<String>,
+        master_password: String,
+        export_password: String,
+    ) -> Result<String> {
+        self.inner
+            .export_vaults(
+                context::current(),
+                vault_ids,
+                master_password,
+                export_password,
+            )
+            .await?
+            .map_err(|e| anyhow!("{}", e))
+    }
+
+    async fn preview_import(
+        &self,
+        envelope: String,
+        export_password: String,
+    ) -> Result<ImportPreview> {
+        self.inner
+            .preview_import(context::current(), envelope, export_password)
+            .await?
+            .map_err(|e| anyhow!("{}", e))
+    }
+
+    async fn import_vaults(
+        &self,
+        envelope: String,
+        export_password: String,
+        resolution: ImportResolution,
+    ) -> Result<ImportResult> {
+        self.inner
+            .import_vaults(context::current(), envelope, export_password, resolution)
             .await?
             .map_err(|e| anyhow!("{}", e))
     }
@@ -365,6 +441,237 @@ async fn export_env_file(file_path: &str) -> Result<()> {
 
     std::fs::write(file_path, content).context("Failed to write .env file")?;
     eprintln!("✓ Exported {} secrets to '{}'", secrets.len(), file_path);
+    Ok(())
+}
+
+async fn list_vaults() -> Result<()> {
+    let vaults = VaultClient::connect().await?.list_vaults().await?;
+    if vaults.is_empty() {
+        eprintln!("No vaults found.");
+        return Ok(());
+    }
+
+    for vault in &vaults {
+        match &vault.description {
+            Some(desc) if !desc.is_empty() => println!("{}\t{}", vault.name, desc),
+            _ => println!("{}", vault.name),
+        }
+    }
+    Ok(())
+}
+
+async fn export_vault_file(file_path: &str) -> Result<()> {
+    let vaults = VaultClient::connect().await?.list_vaults().await?;
+    if vaults.is_empty() {
+        return Err(anyhow!("No vaults found."));
+    }
+
+    let vault_names: Vec<String> = vaults.iter().map(|v| v.name.clone()).collect();
+    let selections = MultiSelect::new()
+        .with_prompt("Select vaults to export (space to toggle, enter to confirm)")
+        .items(&vault_names)
+        .interact()?;
+
+    if selections.is_empty() {
+        eprintln!("No vaults selected.");
+        return Ok(());
+    }
+
+    let selected: Vec<&VaultInfo> = selections.iter().map(|&i| &vaults[i]).collect();
+    let vault_ids: Vec<String> = selected.iter().map(|v| v.id.clone()).collect();
+
+    let master_password = Password::new()
+        .with_prompt("Enter master password")
+        .interact()?;
+    let export_password = Password::new()
+        .with_prompt("Enter export password (used to encrypt the file)")
+        .with_confirmation("Confirm export password", "Passwords don't match")
+        .interact()?;
+
+    let envelope = VaultClient::connect()
+        .await?
+        .export_vaults(vault_ids, master_password, export_password)
+        .await?;
+
+    std::fs::write(file_path, envelope).context("Failed to write export file")?;
+    let names: Vec<&str> = selected.iter().map(|v| v.name.as_str()).collect();
+    eprintln!(
+        "✓ Exported {} vault(s) [{}] to '{}'",
+        selected.len(),
+        names.join(", "),
+        file_path
+    );
+    Ok(())
+}
+
+async fn import_vault_file(file_path: &str) -> Result<()> {
+    let path = Path::new(file_path);
+    if !path.exists() {
+        return Err(anyhow!("File not found: {}", file_path));
+    }
+    let envelope = std::fs::read_to_string(path).context("Failed to read export file")?;
+
+    let export_password = Password::new()
+        .with_prompt("Enter export password")
+        .interact()?;
+
+    let preview = VaultClient::connect()
+        .await?
+        .preview_import(envelope.clone(), export_password.clone())
+        .await?;
+
+    let existing_vaults = VaultClient::connect().await?.list_vaults().await?;
+
+    let mut vault_resolutions = Vec::new();
+    for vault in &preview.vaults {
+        eprintln!(
+            "\nVault '{}' ({} environment(s))",
+            vault.name,
+            vault.environments.len()
+        );
+
+        let mut target_name = vault.name.clone();
+        let mut merge_into_existing = false;
+        let mut skip_vault = false;
+        loop {
+            target_name = Input::<String>::new()
+                .with_prompt("Import into vault name")
+                .default(target_name.clone())
+                .interact_text()?;
+
+            match existing_vaults.iter().find(|v| v.name == target_name) {
+                None => break,
+                Some(existing) => {
+                    let choices = vec![
+                        format!("Merge into existing vault '{}'", existing.name),
+                        "Choose a different name".to_string(),
+                        "Skip this vault".to_string(),
+                        "Cancel import".to_string(),
+                    ];
+                    let selection = Select::new()
+                        .with_prompt(format!("Vault '{}' already exists", existing.name))
+                        .items(&choices)
+                        .default(0)
+                        .interact()?;
+                    match selection {
+                        0 => {
+                            merge_into_existing = true;
+                            break;
+                        }
+                        1 => continue,
+                        2 => {
+                            skip_vault = true;
+                            break;
+                        }
+                        _ => {
+                            eprintln!("Cancelled.");
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        if skip_vault {
+            vault_resolutions.push(ImportVaultResolution {
+                source_name: vault.name.clone(),
+                target_name,
+                merge_into_existing: false,
+                skip: true,
+                environments: Vec::new(),
+            });
+            continue;
+        }
+
+        let existing_env_names: Vec<String> = if merge_into_existing {
+            let vault_id = existing_vaults
+                .iter()
+                .find(|v| v.name == target_name)
+                .map(|v| v.id.clone())
+                .unwrap_or_default();
+            VaultClient::connect()
+                .await?
+                .list_environments(&vault_id)
+                .await?
+                .into_iter()
+                .map(|e| e.name)
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let mut environments = Vec::new();
+        for env in &vault.environments {
+            let (env_target, skip) = if existing_env_names.contains(&env.name) {
+                let choices = vec![
+                    format!(
+                        "Merge {} secret(s) into '{}' (existing keys are kept)",
+                        env.secret_count, env.name
+                    ),
+                    "Skip this environment".to_string(),
+                    "Import under a different environment name".to_string(),
+                ];
+                let selection = Select::new()
+                    .with_prompt(format!("Environment '{}' already exists", env.name))
+                    .items(&choices)
+                    .default(0)
+                    .interact()?;
+                match selection {
+                    0 => (env.name.clone(), false),
+                    1 => (env.name.clone(), true),
+                    _ => (
+                        Input::<String>::new()
+                            .with_prompt("New environment name")
+                            .interact_text()?,
+                        false,
+                    ),
+                }
+            } else {
+                (env.name.clone(), false)
+            };
+
+            environments.push(ImportEnvironmentResolution {
+                source_name: env.name.clone(),
+                target_name: env_target,
+                skip,
+            });
+        }
+
+        vault_resolutions.push(ImportVaultResolution {
+            source_name: vault.name.clone(),
+            target_name,
+            merge_into_existing,
+            skip: false,
+            environments,
+        });
+    }
+
+    let resolution = ImportResolution {
+        vaults: vault_resolutions,
+    };
+
+    let result = VaultClient::connect()
+        .await?
+        .import_vaults(envelope, export_password, resolution)
+        .await?;
+
+    if result.vaults.is_empty() {
+        eprintln!("\nNo vaults imported.");
+        return Ok(());
+    }
+
+    let skipped = if result.skipped_count > 0 {
+        format!(" ({} skipped)", result.skipped_count)
+    } else {
+        String::new()
+    };
+    eprintln!(
+        "\n✓ Imported {} secret(s) into {} vault(s) [{}]{}",
+        result.imported_count,
+        result.vaults.len(),
+        result.vaults.join(", "),
+        skipped
+    );
     Ok(())
 }
 

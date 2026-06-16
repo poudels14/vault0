@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::models::{
+  ImportEnvironmentPreview, ImportEnvironmentResolution, ImportPreview,
+  ImportResolution, ImportResult, ImportVaultPreview, ImportVaultResolution,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultInfo {
   pub id: String,
@@ -66,4 +71,21 @@ pub trait Vault0Service {
   async fn load_with_api_key(
     api_key: String,
   ) -> Result<ApiKeyLoadResponse, String>;
+
+  async fn export_vaults(
+    vault_ids: Vec<String>,
+    master_password: String,
+    export_password: String,
+  ) -> Result<String, String>;
+
+  async fn preview_import(
+    envelope: String,
+    export_password: String,
+  ) -> Result<ImportPreview, String>;
+
+  async fn import_vaults(
+    envelope: String,
+    export_password: String,
+    resolution: ImportResolution,
+  ) -> Result<ImportResult, String>;
 }

@@ -70,3 +70,50 @@ pub struct ApiSecretPayload {
   pub api_key_id: String,
   pub dek: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportPreview {
+  pub vaults: Vec<ImportVaultPreview>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportVaultPreview {
+  pub name: String,
+  pub exists: bool,
+  pub environments: Vec<ImportEnvironmentPreview>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportEnvironmentPreview {
+  pub name: String,
+  pub exists: bool,
+  pub secret_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportResolution {
+  pub vaults: Vec<ImportVaultResolution>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportVaultResolution {
+  pub source_name: String,
+  pub target_name: String,
+  pub merge_into_existing: bool,
+  pub skip: bool,
+  pub environments: Vec<ImportEnvironmentResolution>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportEnvironmentResolution {
+  pub source_name: String,
+  pub target_name: String,
+  pub skip: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportResult {
+  pub vaults: Vec<String>,
+  pub imported_count: i64,
+  pub skipped_count: i64,
+}

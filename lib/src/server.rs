@@ -7,8 +7,8 @@ use tokio::sync::oneshot;
 use tokio_serde::formats::Bincode;
 
 use crate::rpc::{
-  ApiKeyLoadResponse, EncryptedSecretEntry, EnvironmentInfo, Vault0Service,
-  VaultInfo,
+  ApiKeyLoadResponse, EncryptedSecretEntry, EnvironmentInfo, ImportPreview,
+  ImportResolution, ImportResult, Vault0Service, VaultInfo,
 };
 use crate::{db, session};
 
@@ -121,6 +121,71 @@ impl Vault0Service for Vault0Server {
           })
           .collect(),
       })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+  }
+
+  async fn export_vaults(
+    self,
+    _: tarpc::context::Context,
+    vault_ids: Vec<String>,
+    master_password: String,
+    export_password: String,
+  ) -> Result<String, String> {
+    if session::get_master_key().is_err() {
+      return Err(
+        "Session not active. Please unlock the app first.".to_string(),
+      );
+    }
+
+    tokio::task::spawn_blocking(move || {
+      db::auth::verify_password(&master_password)
+        .map_err(|e| format!("Password verification failed: {}", e))?;
+
+      db::export::export_vaults(&vault_ids, &export_password)
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+  }
+
+  async fn preview_import(
+    self,
+    _: tarpc::context::Context,
+    envelope: String,
+    export_password: String,
+  ) -> Result<ImportPreview, String> {
+    if session::get_master_key().is_err() {
+      return Err(
+        "Session not active. Please unlock the app first.".to_string(),
+      );
+    }
+
+    tokio::task::spawn_blocking(move || {
+      db::export::preview_import(&envelope, &export_password)
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+  }
+
+  async fn import_vaults(
+    self,
+    _: tarpc::context::Context,
+    envelope: String,
+    export_password: String,
+    resolution: ImportResolution,
+  ) -> Result<ImportResult, String> {
+    if session::get_master_key().is_err() {
+      return Err(
+        "Session not active. Please unlock the app first.".to_string(),
+      );
+    }
+
+    tokio::task::spawn_blocking(move || {
+      db::export::import_vaults(&envelope, &export_password, &resolution)
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
