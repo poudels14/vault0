@@ -224,8 +224,7 @@ pub fn preview_import(
 
   let mut vaults = Vec::new();
   for vault in &payload.vaults {
-    let existing =
-      existing_vaults.iter().find(|v| v.name == vault.name);
+    let existing = existing_vaults.iter().find(|v| v.name == vault.name);
 
     let existing_env_names: Vec<String> = match existing {
       Some(v) => super::environment::list(&v.id)?
@@ -276,8 +275,11 @@ pub fn import_vaults(
     };
 
     if vres.skip {
-      skipped_count +=
-        vault.environments.iter().map(|e| e.secrets.len() as i64).sum::<i64>();
+      skipped_count += vault
+        .environments
+        .iter()
+        .map(|e| e.secrets.len() as i64)
+        .sum::<i64>();
       continue;
     }
 
@@ -292,17 +294,14 @@ pub fn import_vaults(
     };
     vaults_imported.push(vres.target_name.clone());
 
-    let existing_env_names: Vec<String> =
-      super::environment::list(&vault_id)?
-        .into_iter()
-        .map(|e| e.name)
-        .collect();
+    let existing_env_names: Vec<String> = super::environment::list(&vault_id)?
+      .into_iter()
+      .map(|e| e.name)
+      .collect();
 
     for env in &vault.environments {
-      let Some(eres) = vres
-        .environments
-        .iter()
-        .find(|r| r.source_name == env.name)
+      let Some(eres) =
+        vres.environments.iter().find(|r| r.source_name == env.name)
       else {
         continue;
       };
@@ -315,7 +314,7 @@ pub fn import_vaults(
       let target_env = &eres.target_name;
 
       if !existing_env_names.contains(target_env) {
-        super::environment::create(&vault_id, target_env)?;
+        super::environment::create(&vault_id, target_env, None)?;
       }
 
       let existing_keys: Vec<String> =
@@ -431,8 +430,7 @@ mod tests {
     .unwrap();
     let mut env: Envelope = serde_json::from_str(&envelope).unwrap();
 
-    let mut bytes =
-      general_purpose::STANDARD.decode(&env.ciphertext).unwrap();
+    let mut bytes = general_purpose::STANDARD.decode(&env.ciphertext).unwrap();
     bytes[0] ^= 0xFF;
     env.ciphertext = general_purpose::STANDARD.encode(&bytes);
     let tampered = serde_json::to_string(&env).unwrap();

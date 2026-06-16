@@ -106,10 +106,38 @@ pub fn list(
       value: String::from_utf8(value_plaintext)?,
       created_at: row.created_at,
       updated_at: row.updated_at,
+      inherited: false,
     });
   }
 
   Ok(secrets)
+}
+
+/// Lists secrets for an environment resolved against its inheritance chain:
+/// values from parent environments are included, and any key also defined in a
+/// more derived environment overrides the inherited one. The `environment`
+/// field of each entry reflects where the value is actually defined, and
+/// `inherited` is true when that is an ancestor of `environment_name`.
+pub fn list_resolved(
+  vault_id: &str,
+  environment_name: &str,
+) -> Result<Vec<SecretResponse>> {
+  let chain = super::environment::resolve_chain(vault_id, environment_name)?;
+
+  // Walk root -> target so more derived environments overwrite ancestors.
+  let mut merged: std::collections::HashMap<String, SecretResponse> =
+    std::collections::HashMap::new();
+
+  for env in &chain {
+    for mut secret in list(vault_id, Some(env))? {
+      secret.inherited = env != environment_name;
+      merged.insert(secret.key.clone(), secret);
+    }
+  }
+
+  let mut resolved: Vec<SecretResponse> = merged.into_values().collect();
+  resolved.sort_by(|a, b| a.key.cmp(&b.key));
+  Ok(resolved)
 }
 
 fn secret_exists(
@@ -188,15 +216,7 @@ pub fn create(
   .bind::<BigInt, _>(now)
   .execute(&mut conn)?;
 
-  let _ = super::api_key::sync_secret(
-    &id,
-    vault_id,
-    environment,
-    &encrypted_key.ciphertext,
-    &encrypted_key.nonce,
-    &encrypted_value.ciphertext,
-    &encrypted_value.nonce,
-  );
+  let _ = super::api_key::resync_env_and_descendants(vault_id, environment);
 
   Ok(())
 }
@@ -228,30 +248,7 @@ pub fn update(id: &str, value: &str) -> Result<()> {
     .bind::<Text, _>(id)
     .execute(&mut conn)?;
 
-  let rows: Vec<SecretKeyRow> =
-    sql_query("SELECT encrypted_key, key_nonce FROM secrets WHERE id = ?")
-      .bind::<Text, _>(id)
-      .load(&mut conn)?;
-
-  let row = rows
-    .first()
-    .ok_or_else(|| anyhow::anyhow!("Secret not found"))?;
-
-  let key_nonce_array: [u8; 12] = row
-    .key_nonce
-    .clone()
-    .try_into()
-    .map_err(|_| anyhow::anyhow!("Invalid nonce"))?;
-
-  let _ = super::api_key::sync_secret(
-    id,
-    &vault_id,
-    &environment,
-    &row.encrypted_key,
-    &key_nonce_array,
-    &encrypted_value.ciphertext,
-    &encrypted_value.nonce,
-  );
+  let _ = super::api_key::resync_env_and_descendants(&vault_id, &environment);
 
   Ok(())
 }
@@ -259,10 +256,23 @@ pub fn update(id: &str, value: &str) -> Result<()> {
 pub fn delete(id: &str) -> Result<()> {
   let mut conn = super::conn()?;
 
+  let rows: Vec<SecretDataRow> =
+    sql_query("SELECT vault_id, environment FROM secrets WHERE id = ?")
+      .bind::<Text, _>(id)
+      .load(&mut conn)?;
+  let location = rows
+    .first()
+    .map(|r| (r.vault_id.clone(), r.environment.clone()));
+
   sql_query("DELETE FROM secrets WHERE id = ?")
     .bind::<Text, _>(id)
     .execute(&mut conn)?;
 
   let _ = super::api_key::delete_for_secret(id);
+
+  if let Some((vault_id, environment)) = location {
+    let _ = super::api_key::resync_env_and_descendants(&vault_id, &environment);
+  }
+
   Ok(())
 }

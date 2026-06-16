@@ -9,6 +9,10 @@ pub struct SecretResponse {
   pub value: String,
   pub created_at: i64,
   pub updated_at: i64,
+  // True when this secret is inherited from a parent environment rather than
+  // defined in the environment that was queried. Only set by resolved listings.
+  #[serde(default)]
+  pub inherited: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,6 +30,8 @@ pub struct EnvironmentResponse {
   pub name: String,
   pub created_at: i64,
   pub display_order: i64,
+  // id of the parent environment this one inherits from, if any.
+  pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

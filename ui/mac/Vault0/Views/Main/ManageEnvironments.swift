@@ -4,10 +4,12 @@ struct ManageEnvironmentsDialog: View {
     @Environment(\.dismiss) var dismiss
     let vaultId: String
     let environments: [String]
+    let environmentItems: [EnvironmentItem]
     @Binding var selectedEnvironment: String
     let onChanged: () -> Void
 
     @State private var newEnvironmentName = ""
+    @State private var newEnvironmentParent: String?
     @State private var validationError: String?
     @State private var showingDeleteAlert = false
     @State private var environmentToDelete: String?
@@ -114,6 +116,34 @@ struct ManageEnvironmentsDialog: View {
                         .disabled(newEnvironmentName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
 
+                    HStack(spacing: 8) {
+                        Text("Inherits from")
+                            .font(.system(size: 12))
+                            .foregroundColor(.vault0TextSecondary)
+
+                        Menu {
+                            Button("None") { newEnvironmentParent = nil }
+                            ForEach(environments, id: \.self) { env in
+                                Button(env) { newEnvironmentParent = env }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(newEnvironmentParent ?? "None")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.vault0TextPrimary)
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.vault0TextSecondary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.vault0Surface)
+                            .cornerRadius(6)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    }
+
                     if let error = validationError {
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.circle.fill")
@@ -156,11 +186,34 @@ struct ManageEnvironmentsDialog: View {
                                         .font(.system(size: 12))
                                         .foregroundColor(.vault0Accent)
                                         .frame(width: 20)
-                                    Text(env)
-                                        .font(.system(size: 13))
-                                        .foregroundColor(.vault0TextPrimary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(env)
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.vault0TextPrimary)
+                                        if let parent = parentName(of: env) {
+                                            Text("inherits from \(parent)")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.vault0TextTertiary)
+                                        }
+                                    }
 
                                     Spacer()
+
+                                    Menu {
+                                        Button("No parent") { setParent(of: env, to: nil) }
+                                        ForEach(environments.filter { $0 != env }, id: \.self) { candidate in
+                                            Button(candidate) { setParent(of: env, to: candidate) }
+                                        }
+                                    } label: {
+                                        Image(systemName: "arrow.triangle.branch")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.vault0TextSecondary)
+                                            .frame(width: 24, height: 24)
+                                    }
+                                    .menuStyle(.borderlessButton)
+                                    .menuIndicator(.hidden)
+                                    .fixedSize()
+                                    .help("Set parent environment")
 
                                     Button(action: {
                                         cloningFrom = env
@@ -225,12 +278,33 @@ struct ManageEnvironmentsDialog: View {
             return
         }
 
-        if Vault0Library.shared.createEnvironment(vaultId: vaultId, name: trimmed) {
+        if Vault0Library.shared.createEnvironment(vaultId: vaultId, name: trimmed, parent: newEnvironmentParent) {
             newEnvironmentName = ""
+            newEnvironmentParent = nil
             validationError = nil
             onChanged()
         } else {
             validationError = "Failed to create"
+        }
+    }
+
+    private func parentName(of env: String) -> String? {
+        guard let item = environmentItems.first(where: { $0.name == env }),
+              let parentId = item.parentId
+        else {
+            return nil
+        }
+        return environmentItems.first(where: { $0.id == parentId })?.name
+    }
+
+    private func setParent(of env: String, to parent: String?) {
+        if Vault0Library.shared.setEnvironmentParent(vaultId: vaultId, name: env, parent: parent) {
+            validationError = nil
+            onChanged()
+        } else {
+            validationError = parent == nil
+                ? "Failed to clear parent"
+                : "Couldn't set parent (would it create a cycle?)"
         }
     }
 

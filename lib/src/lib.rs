@@ -203,7 +203,14 @@ pub extern "C" fn vault0_list_secrets(
       CStr::from_ptr(environment).to_str().ok()
     };
 
-    match db::secret::list(vault_id_str, env_str) {
+    // When scoped to an environment, return the resolved set (inherited values
+    // plus overrides); otherwise list every secret in the vault.
+    let result = match env_str {
+      Some(env) => db::secret::list_resolved(vault_id_str, env),
+      None => db::secret::list(vault_id_str, None),
+    };
+
+    match result {
       Ok(secrets) => match serde_json::to_string(&secrets) {
         Ok(json) => to_c_string(&json),
         Err(_) => std::ptr::null_mut(),
@@ -330,6 +337,7 @@ pub extern "C" fn vault0_list_environments(
 pub extern "C" fn vault0_create_environment(
   vault_id: *const c_char,
   name: *const c_char,
+  parent: *const c_char,
 ) -> bool {
   unsafe {
     let vault_id_str = match CStr::from_ptr(vault_id).to_str() {
@@ -342,7 +350,46 @@ pub extern "C" fn vault0_create_environment(
       Err(_) => return false,
     };
 
-    match db::environment::create(vault_id_str, name_str) {
+    let parent_str = if parent.is_null() {
+      None
+    } else {
+      CStr::from_ptr(parent).to_str().ok()
+    };
+
+    match db::environment::create(vault_id_str, name_str, parent_str) {
+      Ok(_) => true,
+      Err(e) => {
+        eprintln!("{}", e);
+        false
+      }
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_set_environment_parent(
+  vault_id: *const c_char,
+  name: *const c_char,
+  parent: *const c_char,
+) -> bool {
+  unsafe {
+    let vault_id_str = match CStr::from_ptr(vault_id).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    let name_str = match CStr::from_ptr(name).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    let parent_str = if parent.is_null() {
+      None
+    } else {
+      CStr::from_ptr(parent).to_str().ok()
+    };
+
+    match db::environment::set_parent(vault_id_str, name_str, parent_str) {
       Ok(_) => true,
       Err(e) => {
         eprintln!("{}", e);

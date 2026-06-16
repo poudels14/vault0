@@ -171,6 +171,10 @@ class Vault0Library {
     }
 
     func listEnvironments(vaultId: String) -> [String] {
+        listEnvironmentItems(vaultId: vaultId).map(\.name)
+    }
+
+    func listEnvironmentItems(vaultId: String) -> [EnvironmentItem] {
         let jsonPtr = vaultId.withCString { vault0_list_environments($0) }
         guard let jsonPtr else {
             NSLog("vault0_list_environments returned null")
@@ -188,17 +192,35 @@ class Vault0Library {
         do {
             let environments = try JSONDecoder().decode([EnvironmentItem].self, from: data)
             NSLog("Loaded \(environments.count) environments for vault \(vaultId)")
-            return environments.map(\.name)
+            return environments
         } catch {
             NSLog("Failed to decode environments: \(error)")
             return []
         }
     }
 
-    func createEnvironment(vaultId: String, name: String) -> Bool {
+    func createEnvironment(vaultId: String, name: String, parent: String? = nil) -> Bool {
         vaultId.withCString { vId in
             name.withCString { n in
-                vault0_create_environment(vId, n)
+                if let parent {
+                    return parent.withCString { p in
+                        vault0_create_environment(vId, n, p)
+                    }
+                }
+                return vault0_create_environment(vId, n, nil)
+            }
+        }
+    }
+
+    func setEnvironmentParent(vaultId: String, name: String, parent: String?) -> Bool {
+        vaultId.withCString { vId in
+            name.withCString { n in
+                if let parent {
+                    return parent.withCString { p in
+                        vault0_set_environment_parent(vId, n, p)
+                    }
+                }
+                return vault0_set_environment_parent(vId, n, nil)
             }
         }
     }

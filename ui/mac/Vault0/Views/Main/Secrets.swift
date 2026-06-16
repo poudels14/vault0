@@ -4,6 +4,7 @@ struct SecretsListView: View {
     let vaultId: String?
     let selectedEnvironment: String
     let environments: [String]
+    let environmentItems: [EnvironmentItem]
     @Binding var secrets: [Secret]
     @Binding var isLoading: Bool
     var onRefresh: (() -> Void)?
@@ -145,17 +146,24 @@ struct SecretsListView: View {
             LazyVStack(spacing: 0) {
                 ForEach(Array(displayedSecretKeys.enumerated()), id: \.element) { index, key in
                     if let secret = secretsForEnvironment[key] {
+                        let inherited = isInherited(secret)
                         SecretRow(
                             secret: secret,
+                            isInherited: inherited,
+                            originEnvironment: secret.environment,
                             isVisible: visibleSecretId == secret.id,
                             onToggleVisibility: {
                                 toggleSecretVisibility(secretId: secret.id)
                             },
-                            onDelete: {
+                            onDelete: inherited ? nil : {
                                 deleteSecret(secret)
                             },
                             onEdit: { newValue in
-                                updateSecret(secret, newValue: newValue)
+                                if inherited {
+                                    overrideSecret(key: secret.key, value: newValue)
+                                } else {
+                                    updateSecret(secret, newValue: newValue)
+                                }
                             },
                         )
                     } else {
@@ -186,9 +194,35 @@ struct SecretsListView: View {
             .map(\.key))
     }
 
+    /// Selected environment's inheritance chain, ordered root -> selected.
+    private var inheritanceChain: [String] {
+        let byId = Dictionary(uniqueKeysWithValues: environmentItems.map { ($0.id, $0) })
+        var chain: [String] = []
+        var current = environmentItems.first { $0.name.lowercased() == selectedEnvironment.lowercased() }
+        var guardCount = 0
+        while let env = current, guardCount <= environmentItems.count {
+            chain.append(env.name)
+            guard let parentId = env.parentId, let parent = byId[parentId] else { break }
+            current = parent
+            guardCount += 1
+        }
+        return chain.reversed()
+    }
+
+    /// Resolved secrets for the selected environment: values inherited from
+    /// parent environments, with locally-defined secrets overriding them.
     private var secretsForEnvironment: [String: Secret] {
-        let envSecrets = secrets.filter { $0.environment.lowercased() == selectedEnvironment.lowercased() }
-        return Dictionary(uniqueKeysWithValues: envSecrets.map { ($0.key, $0) })
+        var map: [String: Secret] = [:]
+        for env in inheritanceChain {
+            for secret in secrets where secret.environment.lowercased() == env.lowercased() {
+                map[secret.key] = secret
+            }
+        }
+        return map
+    }
+
+    private func isInherited(_ secret: Secret) -> Bool {
+        secret.environment.lowercased() != selectedEnvironment.lowercased()
     }
 
     private var displayedSecretKeys: [String] {
@@ -220,6 +254,13 @@ struct SecretsListView: View {
                 }
             }
         }
+    }
+
+    /// Creates a local copy of an inherited secret in the selected environment,
+    /// shadowing the inherited value.
+    private func overrideSecret(key: String, value: String) {
+        guard let vaultId else { return }
+        handleSaveSecret(vaultId: vaultId, environment: selectedEnvironment, key: key, value: value)
     }
 
     private func toggleSecretVisibility(secretId: String) {
@@ -279,9 +320,11 @@ struct SecretsListView: View {
 
 struct SecretRow: View {
     let secret: Secret
+    var isInherited: Bool = false
+    var originEnvironment: String = ""
     let isVisible: Bool
     let onToggleVisibility: () -> Void
-    let onDelete: () -> Void
+    let onDelete: (() -> Void)?
     let onEdit: (String) -> Void
 
     @State private var showingDeleteAlert = false
@@ -319,7 +362,7 @@ struct SecretRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Color.vault0Success)
+                        .fill(isInherited ? Color.vault0TextTertiary : Color.vault0Success)
                         .frame(width: 6, height: 6)
                     Text(secret.key)
                         .font(.system(size: 13, weight: .medium))
@@ -339,9 +382,20 @@ struct SecretRow: View {
                     .help("Copy key")
                     .opacity(isHovering ? 1 : 0)
                     .allowsHitTesting(isHovering)
+
+                    if isInherited {
+                        Text("inherited")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.vault0TextSecondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(Color.vault0Surface),
+                            )
+                    }
                 }
 
-                Text(formattedUpdatedDate(secret.updatedDate))
+                Text(isInherited ? "Inherited from \(originEnvironment)" : formattedUpdatedDate(secret.updatedDate))
                     .font(.system(size: 11, weight: .light))
                     .foregroundColor(.vault0TextTertiary)
                     .padding(.leading, 14)
@@ -380,17 +434,19 @@ struct SecretRow: View {
                     .help("Copy to clipboard")
 
                     ActionButton(
-                        icon: "square.and.pencil",
+                        icon: isInherited ? "plus.square.on.square" : "square.and.pencil",
                         action: { showingEditSheet = true },
                     )
-                    .help("Edit secret")
+                    .help(isInherited ? "Override in this environment" : "Edit secret")
 
-                    ActionButton(
-                        icon: "trash",
-                        action: { showingDeleteAlert = true },
-                        hoverColor: .vault0Error,
-                    )
-                    .help("Delete secret")
+                    if onDelete != nil {
+                        ActionButton(
+                            icon: "trash",
+                            action: { showingDeleteAlert = true },
+                            hoverColor: .vault0Error,
+                        )
+                        .help("Delete secret")
+                    }
                 }
             }
             .frame(width: 112)
@@ -405,7 +461,7 @@ struct SecretRow: View {
         }
         .alert("Delete Secret", isPresented: $showingDeleteAlert) {
             Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive, action: onDelete)
+            Button("Delete", role: .destructive) { onDelete?() }
         } message: {
             Text("Are you sure you want to delete \"\(secret.key)\"? This action cannot be undone.")
         }

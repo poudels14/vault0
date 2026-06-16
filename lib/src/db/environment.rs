@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use anyhow::{bail, Result};
 use diesel::prelude::*;
 use diesel::sql_query;
-use diesel::sql_types::{BigInt, Binary, Text};
+use diesel::sql_types::{BigInt, Binary, Nullable, Text};
 use uuid::Uuid;
 
 use crate::models::EnvironmentResponse;
@@ -16,6 +18,8 @@ struct EnvironmentRow {
   created_at: i64,
   #[diesel(sql_type = BigInt)]
   display_order: i64,
+  #[diesel(sql_type = Nullable<Text>)]
+  parent_id: Option<String>,
 }
 
 #[derive(QueryableByName)]
@@ -34,7 +38,7 @@ pub fn list(vault_id: &str) -> Result<Vec<EnvironmentResponse>> {
   let mut conn = super::conn()?;
 
   let rows: Vec<EnvironmentRow> = sql_query(
-    "SELECT id, name, created_at, display_order FROM vault_environments WHERE vault_id = ? ORDER BY display_order",
+    "SELECT id, name, created_at, display_order, parent_id FROM vault_environments WHERE vault_id = ? ORDER BY display_order",
   )
   .bind::<Text, _>(vault_id)
   .load(&mut conn)?;
@@ -47,18 +51,105 @@ pub fn list(vault_id: &str) -> Result<Vec<EnvironmentResponse>> {
         name: r.name,
         created_at: r.created_at,
         display_order: r.display_order,
+        parent_id: r.parent_id,
       })
       .collect(),
   )
 }
 
-pub fn create(vault_id: &str, name: &str) -> Result<()> {
+fn load_rows(
+  conn: &mut SqliteConnection,
+  vault_id: &str,
+) -> Result<Vec<EnvironmentRow>> {
+  Ok(
+    sql_query(
+      "SELECT id, name, created_at, display_order, parent_id FROM vault_environments WHERE vault_id = ?",
+    )
+    .bind::<Text, _>(vault_id)
+    .load(conn)?,
+  )
+}
+
+/// Returns the inheritance chain for an environment, ordered from the root
+/// ancestor down to the requested environment itself. Secrets resolve by
+/// walking this chain in order, with later (more derived) environments
+/// overriding earlier ones.
+pub fn resolve_chain(vault_id: &str, name: &str) -> Result<Vec<String>> {
+  let mut conn = super::conn()?;
+  let rows = load_rows(&mut conn, vault_id)?;
+
+  let mut chain = vec![name.to_string()];
+  let mut current = name.to_string();
+  let mut visited = HashSet::new();
+  visited.insert(current.clone());
+
+  loop {
+    let Some(row) = rows.iter().find(|r| r.name == current) else {
+      break;
+    };
+    let Some(parent_id) = &row.parent_id else {
+      break;
+    };
+    let Some(parent) = rows.iter().find(|r| &r.id == parent_id) else {
+      break;
+    };
+    if !visited.insert(parent.name.clone()) {
+      bail!("Environment inheritance cycle detected");
+    }
+    chain.push(parent.name.clone());
+    current = parent.name.clone();
+  }
+
+  chain.reverse();
+  Ok(chain)
+}
+
+/// Names of environments that directly or transitively inherit from `name`,
+/// including `name` itself. Used to find which API key snapshots must be
+/// rebuilt when secrets in an environment change.
+pub fn descendants_inclusive(
+  vault_id: &str,
+  name: &str,
+) -> Result<Vec<String>> {
+  let mut conn = super::conn()?;
+  let rows = load_rows(&mut conn, vault_id)?;
+
+  let mut result = vec![name.to_string()];
+  let mut i = 0;
+  while i < result.len() {
+    let current = result[i].clone();
+    let current_id = rows.iter().find(|r| r.name == current).map(|r| &r.id);
+    if let Some(current_id) = current_id {
+      for row in &rows {
+        if row.parent_id.as_ref() == Some(current_id)
+          && !result.contains(&row.name)
+        {
+          result.push(row.name.clone());
+        }
+      }
+    }
+    i += 1;
+  }
+
+  Ok(result)
+}
+
+pub fn create(vault_id: &str, name: &str, parent: Option<&str>) -> Result<()> {
   let mut conn = super::conn()?;
   let name_lower = name.trim().to_lowercase();
 
   if name_lower.contains(' ') {
     bail!("Environment name cannot contain spaces");
   }
+
+  let parent_id = match parent {
+    Some(p) if !p.trim().is_empty() => Some(resolve_parent_id(
+      &mut conn,
+      vault_id,
+      &p.trim().to_lowercase(),
+    )?),
+    _ => None,
+  };
 
   let now = chrono::Utc::now().timestamp();
 
@@ -72,20 +163,82 @@ pub fn create(vault_id: &str, name: &str) -> Result<()> {
   let id = Uuid::new_v4().to_string();
 
   sql_query(
-    "INSERT INTO vault_environments (id, vault_id, name, created_at, display_order) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO vault_environments (id, vault_id, name, created_at, display_order, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
   )
   .bind::<Text, _>(&id)
   .bind::<Text, _>(vault_id)
   .bind::<Text, _>(&name_lower)
   .bind::<BigInt, _>(now)
   .bind::<BigInt, _>(max_order + 1)
+  .bind::<Nullable<Text>, _>(parent_id)
   .execute(&mut conn)?;
 
   Ok(())
 }
 
+fn resolve_parent_id(
+  conn: &mut SqliteConnection,
+  vault_id: &str,
+  parent_name: &str,
+) -> Result<String> {
+  let rows: Vec<EnvironmentRow> = sql_query(
+    "SELECT id, name, created_at, display_order, parent_id FROM vault_environments WHERE vault_id = ? AND name = ?",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(parent_name)
+  .load(conn)?;
+
+  rows.first().map(|r| r.id.clone()).ok_or_else(|| {
+    anyhow::anyhow!("Parent environment '{}' not found", parent_name)
+  })
+}
+
+/// Sets (or clears, when `parent` is None) the parent of an environment.
+/// Rejects assignments that would create a cycle.
+pub fn set_parent(
+  vault_id: &str,
+  name: &str,
+  parent: Option<&str>,
+) -> Result<()> {
+  let name_lower = name.trim().to_lowercase();
+
+  let parent_id = match parent {
+    Some(p) if !p.trim().is_empty() => {
+      let parent_lower = p.trim().to_lowercase();
+      if parent_lower == name_lower {
+        bail!("An environment cannot inherit from itself");
+      }
+      // The new parent's chain must not already include this environment,
+      // otherwise we would form a cycle.
+      if resolve_chain(vault_id, &parent_lower)?.contains(&name_lower) {
+        bail!("This parent would create an inheritance cycle");
+      }
+      let mut conn = super::conn()?;
+      Some(resolve_parent_id(&mut conn, vault_id, &parent_lower)?)
+    }
+    _ => None,
+  };
+
+  let mut conn = super::conn()?;
+  let updated =
+    sql_query("UPDATE vault_environments SET parent_id = ? WHERE vault_id = ? AND name = ?")
+      .bind::<Nullable<Text>, _>(parent_id)
+      .bind::<Text, _>(vault_id)
+      .bind::<Text, _>(&name_lower)
+      .execute(&mut conn)?;
+
+  if updated == 0 {
+    bail!("Environment '{}' not found", name_lower);
+  }
+
+  // Resolution changed for this environment and everything inheriting from it.
+  let _ = super::api_key::resync_env_and_descendants(vault_id, &name_lower);
+
+  Ok(())
+}
+
 pub fn clone(vault_id: &str, source_name: &str, new_name: &str) -> Result<()> {
-  create(vault_id, new_name)?;
+  create(vault_id, new_name, None)?;
 
   #[derive(QueryableByName)]
   struct SecretCopyRow {
@@ -137,17 +290,9 @@ pub fn clone(vault_id: &str, source_name: &str, new_name: &str) -> Result<()> {
     .bind::<BigInt, _>(now)
     .bind::<BigInt, _>(now)
     .execute(&mut conn)?;
-
-    let _ = super::api_key::sync_secret(
-      &id,
-      vault_id,
-      new_name,
-      &row.encrypted_key,
-      &key_nonce_array,
-      &row.encrypted_value,
-      &value_nonce_array,
-    );
   }
+
+  let _ = super::api_key::resync_env_and_descendants(vault_id, new_name);
 
   Ok(())
 }
@@ -165,6 +310,21 @@ pub fn delete(vault_id: &str, name: &str) -> Result<()> {
 
   if count <= 1 {
     bail!("Cannot delete the last environment");
+  }
+
+  let child_rows: Vec<CountRow> = sql_query(
+    "SELECT COUNT(*) as count FROM vault_environments
+     WHERE vault_id = ? AND parent_id = (
+       SELECT id FROM vault_environments WHERE vault_id = ? AND name = ?
+     )",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(name)
+  .load(&mut conn)?;
+
+  if child_rows.first().map(|r| r.count).unwrap_or(0) > 0 {
+    bail!("Cannot delete an environment that has child environments. Reassign or delete its children first.");
   }
 
   sql_query(
@@ -190,4 +350,86 @@ pub fn delete(vault_id: &str, name: &str) -> Result<()> {
     .execute(&mut conn)?;
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::path::PathBuf;
+
+  // Creates an isolated vault and returns its id. Avoids colliding with the
+  // seeded "default" vault or other tests sharing the in-memory pool.
+  fn fresh_vault(tag: &str) -> String {
+    super::super::init(&PathBuf::from(":memory:")).unwrap();
+    let mut conn = super::super::conn().unwrap();
+    let id = Uuid::new_v4().to_string();
+    let name = format!("vault-{}-{}", tag, &id[..8]);
+    let now = chrono::Utc::now().timestamp();
+    sql_query(
+      "INSERT INTO vaults (id, name, description, created_at, updated_at) VALUES (?, ?, NULL, ?, ?)",
+    )
+    .bind::<Text, _>(&id)
+    .bind::<Text, _>(&name)
+    .bind::<BigInt, _>(now)
+    .bind::<BigInt, _>(now)
+    .execute(&mut conn)
+    .unwrap();
+    id
+  }
+
+  #[test]
+  fn test_resolve_chain_and_descendants() {
+    let _g = super::super::test_guard();
+    let vault_id = fresh_vault("chain");
+
+    create(&vault_id, "base", None).unwrap();
+    create(&vault_id, "staging", Some("base")).unwrap();
+    create(&vault_id, "feature", Some("staging")).unwrap();
+    create(&vault_id, "prod", Some("base")).unwrap();
+
+    assert_eq!(resolve_chain(&vault_id, "base").unwrap(), vec!["base"]);
+    assert_eq!(
+      resolve_chain(&vault_id, "feature").unwrap(),
+      vec!["base", "staging", "feature"]
+    );
+
+    let mut desc = descendants_inclusive(&vault_id, "base").unwrap();
+    desc.sort();
+    assert_eq!(desc, vec!["base", "feature", "prod", "staging"]);
+
+    let leaf = descendants_inclusive(&vault_id, "feature").unwrap();
+    assert_eq!(leaf, vec!["feature"]);
+  }
+
+  #[test]
+  fn test_set_parent_rejects_cycle() {
+    let _g = super::super::test_guard();
+    let vault_id = fresh_vault("cycle");
+
+    create(&vault_id, "a", None).unwrap();
+    create(&vault_id, "b", Some("a")).unwrap();
+    create(&vault_id, "c", Some("b")).unwrap();
+
+    // Making "a" inherit from its own descendant "c" must be rejected.
+    assert!(set_parent(&vault_id, "a", Some("c")).is_err());
+    // Re-parenting within the tree without a cycle is allowed.
+    assert!(set_parent(&vault_id, "c", Some("a")).is_ok());
+    assert_eq!(resolve_chain(&vault_id, "c").unwrap(), vec!["a", "c"]);
+  }
+
+  #[test]
+  fn test_delete_blocks_when_children_exist() {
+    let _g = super::super::test_guard();
+    let vault_id = fresh_vault("del");
+
+    create(&vault_id, "parent", None).unwrap();
+    create(&vault_id, "child", Some("parent")).unwrap();
+    create(&vault_id, "other", None).unwrap();
+
+    // Blocked while a child still references it.
+    assert!(delete(&vault_id, "parent").is_err());
+    assert!(delete(&vault_id, "child").is_ok());
+    // Now that the child is gone, the parent can be deleted.
+    assert!(delete(&vault_id, "parent").is_ok());
+  }
 }

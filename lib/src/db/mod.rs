@@ -8,7 +8,7 @@ pub mod vault;
 pub mod vault_key;
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use diesel::prelude::*;
@@ -19,8 +19,24 @@ use diesel::sql_types::Integer;
 pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 
 static DB_POOL: OnceLock<DbPool> = OnceLock::new();
+static INIT_LOCK: Mutex<()> = Mutex::new(());
+
+// Serializes DB-touching tests, which all share one in-memory database and
+// would otherwise hit shared-cache "table is locked" errors when run in
+// parallel. Tolerates poisoning so one failing test doesn't cascade.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+  TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 pub fn init(db_path: &PathBuf) -> Result<()> {
+  // Serialize initialization so concurrent first-time callers don't both build
+  // a pool and run migrations against the same database.
+  let _guard = INIT_LOCK.lock().unwrap();
+
   if DB_POOL.get().is_some() {
     return Ok(());
   }
@@ -30,7 +46,9 @@ pub fn init(db_path: &PathBuf) -> Result<()> {
   }
 
   let db_url = if db_path.to_string_lossy() == ":memory:" {
-    ":memory:".to_string()
+    // A shared-cache in-memory database so every pooled connection sees the
+    // same schema and data. Used only by tests; production always uses a file.
+    "file::memory:?cache=shared".to_string()
   } else {
     db_path.to_string_lossy().to_string()
   };
@@ -70,8 +88,13 @@ fn run_migrations(pool: &DbPool) -> Result<()> {
   )
   .execute(&mut conn)?;
 
-  let migrations =
-    [(1, include_str!("../../migrations/001_initial_schema.sql"))];
+  let migrations = [
+    (1, include_str!("../../migrations/001_initial_schema.sql")),
+    (
+      2,
+      include_str!("../../migrations/002_environment_parent.sql"),
+    ),
+  ];
 
   for (version, migration_sql) in migrations {
     #[derive(QueryableByName)]
@@ -118,6 +141,7 @@ mod tests {
 
   #[test]
   fn test_init_db() {
+    let _g = test_guard();
     init(&PathBuf::from(":memory:")).unwrap();
 
     let mut conn = conn().unwrap();

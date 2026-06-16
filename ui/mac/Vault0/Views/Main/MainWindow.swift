@@ -11,6 +11,7 @@ struct MainWindowView: View {
     @State private var showingSettings: Bool = false
     @State private var selectedTab: Tab = .secrets
     @State private var vaultEnvironments: [String] = []
+    @State private var environmentItems: [EnvironmentItem] = []
 
     enum Tab: String, CaseIterable {
         case secrets = "Secrets"
@@ -68,7 +69,8 @@ struct MainWindowView: View {
             return
         }
 
-        vaultEnvironments = Vault0Library.shared.listEnvironments(vaultId: vaultId)
+        environmentItems = Vault0Library.shared.listEnvironmentItems(vaultId: vaultId)
+        vaultEnvironments = environmentItems.map(\.name)
 
         if !vaultEnvironments.contains(selectedEnvironment), let firstEnv = vaultEnvironments.first {
             selectedEnvironment = firstEnv
@@ -88,6 +90,7 @@ struct MainWindowView: View {
 
             SidebarEnvironmentSection(
                 environments: vaultEnvironments,
+                environmentItems: environmentItems,
                 selectedVaultId: $selectedVaultId,
                 selectedEnvironment: $selectedEnvironment,
                 onEnvironmentsChanged: refreshVaultData,
@@ -113,6 +116,7 @@ struct MainWindowView: View {
                         vaultId: selectedVaultId,
                         selectedEnvironment: selectedEnvironment,
                         environments: vaultEnvironments,
+                        environmentItems: environmentItems,
                         secrets: $secrets,
                         isLoading: $isLoading,
                         onRefresh: refreshVaultData,
@@ -214,11 +218,12 @@ struct MainWindowView: View {
 
         DispatchQueue.global(qos: .userInitiated).async {
             let loadedSecrets = Vault0Library.shared.listSecrets(vaultId: vaultId, environment: nil)
-            let loadedEnvs = Vault0Library.shared.listEnvironments(vaultId: vaultId)
+            let loadedEnvItems = Vault0Library.shared.listEnvironmentItems(vaultId: vaultId)
 
             DispatchQueue.main.async {
                 secrets = loadedSecrets
-                vaultEnvironments = loadedEnvs
+                environmentItems = loadedEnvItems
+                vaultEnvironments = loadedEnvItems.map(\.name)
                 isLoading = false
 
                 if !vaultEnvironments.contains(selectedEnvironment), let firstEnv = vaultEnvironments.first {
@@ -337,6 +342,7 @@ struct SidebarVaultSection: View {
 
 struct SidebarEnvironmentSection: View {
     let environments: [String]
+    let environmentItems: [EnvironmentItem]
     @Binding var selectedVaultId: String?
     @Binding var selectedEnvironment: String
     let onEnvironmentsChanged: () -> Void
@@ -370,9 +376,10 @@ struct SidebarEnvironmentSection: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
             } else {
-                ForEach(environments, id: \.self) { env in
+                ForEach(orderedEnvironments, id: \.self) { env in
                     SidebarEnvironmentButton(
                         title: env,
+                        depth: depth(for: env),
                         isSelected: selectedEnvironment == env,
                         action: { selectedEnvironment = env },
                     )
@@ -386,29 +393,71 @@ struct SidebarEnvironmentSection: View {
                 ManageEnvironmentsDialog(
                     vaultId: selectedVaultId,
                     environments: environments,
+                    environmentItems: environmentItems,
                     selectedEnvironment: $selectedEnvironment,
                     onChanged: onEnvironmentsChanged,
                 )
             }
         }
     }
+
+    /// Environments ordered as a tree: each parent immediately followed by its
+    /// children (depth-first), so inherited environments nest under their parent.
+    private var orderedEnvironments: [String] {
+        guard !environmentItems.isEmpty else { return environments }
+
+        let childrenByParent = Dictionary(grouping: environmentItems, by: { $0.parentId })
+        var result: [String] = []
+
+        func appendChildren(of parentId: String?) {
+            let children = (childrenByParent[parentId] ?? [])
+                .sorted { $0.displayOrder < $1.displayOrder }
+            for child in children {
+                result.append(child.name)
+                appendChildren(of: child.id)
+            }
+        }
+
+        appendChildren(of: nil)
+
+        // Safety net: surface any environment not reached via the tree walk.
+        for name in environments where !result.contains(name) {
+            result.append(name)
+        }
+        return result
+    }
+
+    private func depth(for name: String) -> Int {
+        let byId = Dictionary(uniqueKeysWithValues: environmentItems.map { ($0.id, $0) })
+        var current = environmentItems.first { $0.name == name }
+        var depth = 0
+        var guardCount = 0
+        while let parentId = current?.parentId, let parent = byId[parentId], guardCount < environmentItems.count {
+            depth += 1
+            current = parent
+            guardCount += 1
+        }
+        return depth
+    }
 }
 
 struct SidebarEnvironmentButton: View {
     let title: String
+    var depth: Int = 0
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: "server.rack")
+                Image(systemName: depth > 0 ? "arrow.turn.down.right" : "server.rack")
                     .font(.system(size: 12))
                     .frame(width: 16)
                 Text(title)
                     .font(.system(size: 13))
                 Spacer()
             }
+            .padding(.leading, CGFloat(depth) * 14)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .contentShape(Rectangle())

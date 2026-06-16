@@ -206,7 +206,7 @@ impl Vault0Service for Vault0Server {
       db::auth::verify_password(&request.master_password)
         .map_err(|e| format!("Password verification failed: {}", e))?;
 
-      db::secret::list(&request.vault_id, Some(&request.environment))
+      db::secret::list_resolved(&request.vault_id, &request.environment)
         .map(|secrets| {
           secrets
             .into_iter()

@@ -31,20 +31,6 @@ struct PublicKeyRow {
 }
 
 #[derive(QueryableByName)]
-struct SecretForDuplicateRow {
-  #[diesel(sql_type = Text)]
-  id: String,
-  #[diesel(sql_type = Binary)]
-  encrypted_key: Vec<u8>,
-  #[diesel(sql_type = Binary)]
-  key_nonce: Vec<u8>,
-  #[diesel(sql_type = Binary)]
-  encrypted_value: Vec<u8>,
-  #[diesel(sql_type = Binary)]
-  value_nonce: Vec<u8>,
-}
-
-#[derive(QueryableByName)]
 struct ApiKeyRow {
   #[diesel(sql_type = Text)]
   id: String,
@@ -84,12 +70,6 @@ struct ApiKeySecretRow {
   encrypted_value: Vec<u8>,
   #[diesel(sql_type = Binary)]
   value_nonce: Vec<u8>,
-}
-
-#[derive(QueryableByName)]
-struct IdRow {
-  #[diesel(sql_type = Text)]
-  id: String,
 }
 
 pub struct EncryptedSecret {
@@ -139,7 +119,8 @@ pub fn create(request: &CreateApiKeyRequest) -> Result<ApiKeyResponse> {
   .bind::<BigInt, _>(now)
   .execute(&mut conn)?;
 
-  duplicate_secrets(
+  rebuild_secrets_with_dek(
+    &mut conn,
     &api_key_id,
     &request.vault_id,
     &request.environment,
@@ -288,110 +269,65 @@ pub fn get_encrypted_secrets(api_key_id: &str) -> Result<Vec<EncryptedSecret>> {
   )
 }
 
-pub fn sync_secret(
-  secret_id: &str,
+/// Rebuilds the cached secret snapshot for every API key whose environment is
+/// `environment` or inherits from it, re-encrypting the resolved secret set
+/// (including inherited values, with overrides applied) under each key's DEK.
+/// Used whenever secrets or the inheritance chain change.
+pub fn resync_env_and_descendants(
   vault_id: &str,
   environment: &str,
-  encrypted_key: &[u8],
-  key_nonce: &[u8; 12],
-  encrypted_value: &[u8],
-  value_nonce: &[u8; 12],
 ) -> Result<()> {
+  let affected =
+    super::environment::descendants_inclusive(vault_id, environment)?;
+
   let mut conn = super::conn()?;
-  let vault_key = session::get_vault_key(vault_id)?;
-
-  let api_keys: Vec<ApiKeyDekRow> = sql_query(
-    "SELECT id, encrypted_dek, dek_nonce, expires_at
-     FROM api_keys
-     WHERE vault_id = ? AND environment = ?",
-  )
-  .bind::<Text, _>(vault_id)
-  .bind::<Text, _>(environment)
-  .load(&mut conn)?;
-
   let master_key = session::get_master_key()?;
   let now = Utc::now().timestamp();
 
-  for api_key in api_keys {
-    if let Some(exp) = api_key.expires_at {
-      if now > exp {
-        continue;
-      }
-    }
-
-    let dek_nonce_array: [u8; 12] = api_key
-      .dek_nonce
-      .as_slice()
-      .try_into()
-      .map_err(|_| anyhow::anyhow!("Invalid DEK nonce size"))?;
-
-    let dek = decrypt_data(
-      master_key.as_bytes(),
-      &EncryptedData {
-        ciphertext: api_key.encrypted_dek,
-        nonce: dek_nonce_array,
-      },
-    )?;
-
-    let dek_array: [u8; 32] = dek
-      .as_slice()
-      .try_into()
-      .map_err(|_| anyhow::anyhow!("Invalid DEK size"))?;
-
-    let decrypted_key = decrypt_data(
-      vault_key.as_bytes(),
-      &EncryptedData {
-        ciphertext: encrypted_key.to_vec(),
-        nonce: *key_nonce,
-      },
-    )?;
-
-    let decrypted_value = decrypt_data(
-      vault_key.as_bytes(),
-      &EncryptedData {
-        ciphertext: encrypted_value.to_vec(),
-        nonce: *value_nonce,
-      },
-    )?;
-
-    let encrypted_key_dek = encrypt_data(&dek_array, &decrypted_key)?;
-    let encrypted_value_dek = encrypt_data(&dek_array, &decrypted_value)?;
-
-    let existing: Vec<IdRow> = sql_query(
-      "SELECT id FROM api_key_secrets WHERE api_key_id = ? AND secret_id = ?",
+  for env in &affected {
+    let api_keys: Vec<ApiKeyDekRow> = sql_query(
+      "SELECT id, encrypted_dek, dek_nonce, expires_at
+       FROM api_keys
+       WHERE vault_id = ? AND environment = ?",
     )
-    .bind::<Text, _>(&api_key.id)
-    .bind::<Text, _>(secret_id)
+    .bind::<Text, _>(vault_id)
+    .bind::<Text, _>(env)
     .load(&mut conn)?;
 
-    if let Some(row) = existing.first() {
-      sql_query(
-        "UPDATE api_key_secrets SET encrypted_key = ?, encrypted_value = ?, key_nonce = ?, value_nonce = ?, updated_at = ?
-         WHERE id = ?",
-      )
-      .bind::<Binary, _>(&encrypted_key_dek.ciphertext)
-      .bind::<Binary, _>(&encrypted_value_dek.ciphertext)
-      .bind::<Binary, _>(encrypted_key_dek.nonce.as_slice())
-      .bind::<Binary, _>(encrypted_value_dek.nonce.as_slice())
-      .bind::<BigInt, _>(now)
-      .bind::<Text, _>(&row.id)
-      .execute(&mut conn)?;
-    } else {
-      let api_key_secret_id = Uuid::new_v4().to_string();
-      sql_query(
-        "INSERT INTO api_key_secrets (id, api_key_id, secret_id, encrypted_key, encrypted_value, key_nonce, value_nonce, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .bind::<Text, _>(&api_key_secret_id)
-      .bind::<Text, _>(&api_key.id)
-      .bind::<Text, _>(secret_id)
-      .bind::<Binary, _>(&encrypted_key_dek.ciphertext)
-      .bind::<Binary, _>(&encrypted_value_dek.ciphertext)
-      .bind::<Binary, _>(encrypted_key_dek.nonce.as_slice())
-      .bind::<Binary, _>(encrypted_value_dek.nonce.as_slice())
-      .bind::<BigInt, _>(now)
-      .bind::<BigInt, _>(now)
-      .execute(&mut conn)?;
+    for api_key in api_keys {
+      if let Some(exp) = api_key.expires_at {
+        if now > exp {
+          continue;
+        }
+      }
+
+      let dek_nonce_array: [u8; 12] =
+        api_key
+          .dek_nonce
+          .as_slice()
+          .try_into()
+          .map_err(|_| anyhow::anyhow!("Invalid DEK nonce size"))?;
+
+      let dek = decrypt_data(
+        master_key.as_bytes(),
+        &EncryptedData {
+          ciphertext: api_key.encrypted_dek,
+          nonce: dek_nonce_array,
+        },
+      )?;
+
+      let dek_array: [u8; 32] = dek
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid DEK size"))?;
+
+      rebuild_secrets_with_dek(
+        &mut conn,
+        &api_key.id,
+        vault_id,
+        env,
+        &dek_array,
+      )?;
     }
   }
 
@@ -486,54 +422,25 @@ fn get_ecdsa_public_key_pem() -> Result<Vec<u8>> {
   )
 }
 
-fn duplicate_secrets(
+/// Replaces an API key's cached secret snapshot with the resolved secret set
+/// for `environment` (inherited values plus overrides), each re-encrypted under
+/// the API key's `dek`.
+fn rebuild_secrets_with_dek(
+  conn: &mut SqliteConnection,
   api_key_id: &str,
   vault_id: &str,
   environment: &str,
   dek: &[u8; 32],
 ) -> Result<()> {
-  let mut conn = super::conn()?;
-  let vault_key = session::get_vault_key(vault_id)?;
+  sql_query("DELETE FROM api_key_secrets WHERE api_key_id = ?")
+    .bind::<Text, _>(api_key_id)
+    .execute(conn)?;
 
-  let secrets: Vec<SecretForDuplicateRow> = sql_query(
-    "SELECT id, encrypted_key, key_nonce, encrypted_value, value_nonce
-     FROM secrets
-     WHERE vault_id = ? AND environment = ?",
-  )
-  .bind::<Text, _>(vault_id)
-  .bind::<Text, _>(environment)
-  .load(&mut conn)?;
+  let resolved = super::secret::list_resolved(vault_id, environment)?;
 
-  for secret in secrets {
-    let key_nonce_array: [u8; 12] = secret
-      .key_nonce
-      .as_slice()
-      .try_into()
-      .map_err(|_| anyhow::anyhow!("Invalid nonce size"))?;
-    let value_nonce_array: [u8; 12] = secret
-      .value_nonce
-      .as_slice()
-      .try_into()
-      .map_err(|_| anyhow::anyhow!("Invalid nonce size"))?;
-
-    let decrypted_key = decrypt_data(
-      vault_key.as_bytes(),
-      &EncryptedData {
-        ciphertext: secret.encrypted_key,
-        nonce: key_nonce_array,
-      },
-    )?;
-
-    let decrypted_value = decrypt_data(
-      vault_key.as_bytes(),
-      &EncryptedData {
-        ciphertext: secret.encrypted_value,
-        nonce: value_nonce_array,
-      },
-    )?;
-
-    let encrypted_key_dek = encrypt_data(dek, &decrypted_key)?;
-    let encrypted_value_dek = encrypt_data(dek, &decrypted_value)?;
+  for secret in resolved {
+    let encrypted_key_dek = encrypt_data(dek, secret.key.as_bytes())?;
+    let encrypted_value_dek = encrypt_data(dek, secret.value.as_bytes())?;
 
     let now = Utc::now().timestamp();
     let api_key_secret_id = Uuid::new_v4().to_string();
@@ -551,7 +458,7 @@ fn duplicate_secrets(
     .bind::<Binary, _>(encrypted_value_dek.nonce.as_slice())
     .bind::<BigInt, _>(now)
     .bind::<BigInt, _>(now)
-    .execute(&mut conn)?;
+    .execute(conn)?;
   }
 
   Ok(())

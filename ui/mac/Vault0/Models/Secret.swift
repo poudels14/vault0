@@ -52,11 +52,13 @@ struct EnvironmentItem: Codable, Identifiable {
     let name: String
     let createdAt: Int64
     let displayOrder: Int64
+    let parentId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case createdAt = "created_at"
         case displayOrder = "display_order"
+        case parentId = "parent_id"
     }
 
     var createdDate: Date {
