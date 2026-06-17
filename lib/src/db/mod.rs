@@ -1,4 +1,3 @@
-pub mod api_key;
 pub mod auth;
 pub mod environment;
 pub mod export;
@@ -99,6 +98,7 @@ fn run_migrations(pool: &DbPool) -> Result<()> {
       3,
       include_str!("../../migrations/003_environment_onepassword.sql"),
     ),
+    (4, include_str!("../../migrations/004_drop_api_keys.sql")),
   ];
 
   for (version, migration_sql) in migrations {

@@ -74,32 +74,13 @@ pub fn create_master_password(password: &str) -> Result<String> {
     &params,
   )?;
 
-  let ecdsa_keypair = crypto::generate_ecdsa_keypair();
-  let ecdsa_private_key_bytes = &ecdsa_keypair.private_key.to_bytes().to_vec();
-  let ecdsa_public_key_bytes = &ecdsa_keypair
-    .public_key
-    .to_encoded_point(true)
-    .as_bytes()
-    .to_vec();
-
-  let encrypted_ecdsa_private =
-    crypto::encrypt_data(master_key.as_bytes(), ecdsa_private_key_bytes)?;
-
-  let mut encrypted_ecdsa_with_nonce = Vec::new();
-  encrypted_ecdsa_with_nonce.extend_from_slice(&encrypted_ecdsa_private.nonce);
-  encrypted_ecdsa_with_nonce
-    .extend_from_slice(&encrypted_ecdsa_private.ciphertext);
-
-  keychain::save_ecdsa_private_key(&hex::encode(&encrypted_ecdsa_with_nonce))?;
-
   let now = chrono::Utc::now().timestamp();
   sql_query(
-    "INSERT INTO master_passwords (id, password_hash, secret_code_salt, master_key_salt, ecdsa_public_key, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO master_passwords (id, password_hash, secret_code_salt, master_key_salt, created_at, updated_at) VALUES (1, ?, ?, ?, ?, ?)",
   )
   .bind::<Text, _>(&hash)
   .bind::<Binary, _>(secret_code_salt.as_slice())
   .bind::<Binary, _>(master_key_salt.as_slice())
-  .bind::<Binary, _>(ecdsa_public_key_bytes.as_slice())
   .bind::<BigInt, _>(now)
   .bind::<BigInt, _>(now)
   .execute(&mut conn)?;
@@ -182,41 +163,5 @@ pub fn get_master_key(password: &str) -> Result<MasterKey> {
   let master_key =
     crypto::derive_master_key(password, &secret_code, &salt, &params)?;
 
-  if !keychain::has_ecdsa_private_key() {
-    generate_missing_ecdsa_keys(&master_key)?;
-  }
-
   Ok(master_key)
-}
-
-fn generate_missing_ecdsa_keys(master_key: &MasterKey) -> Result<()> {
-  let mut conn = super::conn()?;
-
-  let ecdsa_keypair = crypto::generate_ecdsa_keypair();
-  let ecdsa_private_key_bytes = &ecdsa_keypair.private_key.to_bytes().to_vec();
-  let ecdsa_public_key_bytes = &ecdsa_keypair
-    .public_key
-    .to_encoded_point(true)
-    .as_bytes()
-    .to_vec();
-
-  let encrypted_ecdsa_private =
-    crypto::encrypt_data(master_key.as_bytes(), ecdsa_private_key_bytes)?;
-
-  let mut encrypted_ecdsa_with_nonce = Vec::new();
-  encrypted_ecdsa_with_nonce.extend_from_slice(&encrypted_ecdsa_private.nonce);
-  encrypted_ecdsa_with_nonce
-    .extend_from_slice(&encrypted_ecdsa_private.ciphertext);
-
-  keychain::save_ecdsa_private_key(&hex::encode(&encrypted_ecdsa_with_nonce))?;
-
-  let now = chrono::Utc::now().timestamp();
-  sql_query(
-    "UPDATE master_passwords SET ecdsa_public_key = ?, updated_at = ? WHERE id = 1",
-  )
-  .bind::<Binary, _>(ecdsa_public_key_bytes.as_slice())
-  .bind::<BigInt, _>(now)
-  .execute(&mut conn)?;
-
-  Ok(())
 }

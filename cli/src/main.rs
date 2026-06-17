@@ -3,11 +3,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
-};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use base64::Engine;
 use clap::{Parser, Subcommand};
 use dialoguer::{Input, MultiSelect, Password, Select};
@@ -15,13 +11,9 @@ use serde::{Deserialize, Serialize};
 use tarpc::{client, context};
 use tokio::net::UnixStream;
 use tokio_serde::formats::Bincode;
-use vault0::{
-    models::ApiSecretPayload,
-    rpc::{
-        EnvironmentInfo, ImportEnvironmentResolution, ImportPreview, ImportResolution,
-        ImportResult, ImportVaultResolution, ListSecretsRequest, SecretEntry, Vault0ServiceClient,
-        VaultInfo,
-    },
+use vault0::rpc::{
+    EnvironmentInfo, ImportEnvironmentResolution, ImportPreview, ImportResolution, ImportResult,
+    ImportVaultResolution, ListSecretsRequest, SecretEntry, Vault0ServiceClient, VaultInfo,
 };
 
 const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
@@ -287,84 +279,32 @@ async fn select_and_load_secrets() -> Result<(VaultInfo, String, Vec<SecretEntry
     Ok((vault, env, secrets))
 }
 
-fn decrypt_secret(dek: &[u8; 32], ciphertext: &[u8], nonce: &[u8]) -> Result<String> {
-    let cipher =
-        Aes256Gcm::new_from_slice(dek).map_err(|e| anyhow!("Failed to create cipher: {}", e))?;
-
-    let nonce_array: [u8; 12] = nonce
-        .try_into()
-        .map_err(|_| anyhow!("Invalid nonce length"))?;
-
-    let plaintext = cipher
-        .decrypt(Nonce::from_slice(&nonce_array), ciphertext)
-        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
-
-    String::from_utf8(plaintext).context("Decrypted data is not valid UTF-8")
-}
-
 async fn load_secrets() -> Result<()> {
-    let api_key = std::env::var("VAULT0_API_KEY").context("VAULT0_API_KEY is not set")?;
-    let api_secret_b64 =
-        std::env::var("VAULT0_API_SECRET").context("VAULT0_API_SECRET is not set")?;
+    let (_vault, environment, secrets) = select_and_load_secrets().await?;
 
-    let api_secret_json = BASE64
-        .decode(&api_secret_b64)
-        .context("Invalid VAULT0_API_SECRET")?;
-    let api_secret: ApiSecretPayload =
-        serde_json::from_slice(&api_secret_json).context("Invalid VAULT0_API_SECRET")?;
-
-    let dek_bytes = BASE64
-        .decode(&api_secret.dek)
-        .context("Invalid VAULT0_API_SECRET")?;
-    if dek_bytes.len() != 32 {
-        bail!("Invalid VAULT0_API_SECRET");
-    }
-    let mut dek: [u8; 32] = [0u8; 32];
-    dek.copy_from_slice(&dek_bytes);
-
-    let client = VaultClient::connect().await?;
-    let result = client
-        .inner
-        .load_with_api_key(context::current(), api_key)
-        .await?
-        .map_err(|e| anyhow!("Failed to load secrets: {}", e))?;
-
-    if result.api_key_id != api_secret.api_key_id {
-        bail!("VAULT0_API_KEY and VAULT0_API_SECRET are not for the same API key");
-    }
-
-    if result.secrets.is_empty() {
-        eprintln!(
-            "# No secrets found for '{}' (vault: '{}', environment: '{}')",
-            result.name, result.vault_id, result.environment
-        );
+    if secrets.is_empty() {
+        eprintln!("# No secrets found in environment '{}'", environment);
         return Ok(());
     }
 
-    let mut decrypted_secrets: Vec<(String, String)> = Vec::new();
-    for secret in &result.secrets {
-        let key = decrypt_secret(&dek, &secret.encrypted_key, &secret.key_nonce)?;
-        let value = decrypt_secret(&dek, &secret.encrypted_value, &secret.value_nonce)?;
-        decrypted_secrets.push((key, value));
-    }
-
-    let variable_names: Vec<String> = decrypted_secrets.iter().map(|(k, _)| k.clone()).collect();
-
-    for (key, value) in &decrypted_secrets {
-        println!("export {}='{}'", key, value.replace('\'', r"'\''"));
+    for secret in &secrets {
+        println!(
+            "export {}='{}'",
+            secret.key,
+            secret.value.replace('\'', r"'\''"),
+        );
     }
 
     let state = LoadedState {
-        variables: variable_names,
+        variables: secrets.iter().map(|s| s.key.clone()).collect(),
     };
-
     let encoded = BASE64.encode(serde_json::to_string(&state)?);
     println!("export VAULT0_SHELL_STATUS={}", encoded);
 
     eprintln!(
         "# Loaded {} secrets (environment: '{}')",
-        decrypted_secrets.len(),
-        result.environment
+        secrets.len(),
+        environment,
     );
 
     Ok(())

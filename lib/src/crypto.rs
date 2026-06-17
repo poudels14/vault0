@@ -3,7 +3,6 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{bail, Result};
 use argon2::password_hash::{PasswordHasher, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
-use p256::ecdsa::{SigningKey, VerifyingKey};
 use rand::RngCore;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -185,46 +184,6 @@ pub fn derive_key(
   key.copy_from_slice(&key_bytes[..32]);
 
   Ok(key)
-}
-
-pub struct EcdsaKeyPair {
-  pub private_key: SigningKey,
-  pub public_key: VerifyingKey,
-}
-
-pub fn generate_ecdsa_keypair() -> EcdsaKeyPair {
-  let private_key = SigningKey::random(&mut OsRng);
-  let public_key = VerifyingKey::from(&private_key);
-
-  EcdsaKeyPair {
-    private_key,
-    public_key,
-  }
-}
-
-pub fn deserialize_ecdsa_private_key(bytes: &[u8]) -> Result<SigningKey> {
-  if bytes.len() != 32 {
-    bail!(
-      "Invalid private key length: expected 32 bytes, got {}",
-      bytes.len()
-    );
-  }
-
-  let mut key_bytes = [0u8; 32];
-  key_bytes.copy_from_slice(bytes);
-
-  SigningKey::from_bytes(&key_bytes.into())
-    .map_err(|e| anyhow::anyhow!("Failed to deserialize private key: {}", e))
-}
-
-pub fn deserialize_ecdsa_public_key(bytes: &[u8]) -> Result<VerifyingKey> {
-  use p256::EncodedPoint;
-
-  let point = EncodedPoint::from_bytes(bytes)
-    .map_err(|e| anyhow::anyhow!("Failed to parse public key: {}", e))?;
-
-  VerifyingKey::from_encoded_point(&point)
-    .map_err(|e| anyhow::anyhow!("Failed to deserialize public key: {}", e))
 }
 
 #[cfg(test)]

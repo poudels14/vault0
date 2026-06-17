@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		0D13C73B0464 /* libvault0.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A1BE1DDFF32D /* libvault0.a */; };
-		22EC3D692F07BE2F007BF95D /* ApiKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC3D682F07BE2F007BF95D /* ApiKeys.swift */; };
 		22EC3D6B2F090141007BF95D /* ManageVaultsDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC3D6A2F090141007BF95D /* ManageVaultsDialog.swift */; };
 		22EC3D722F09048F007BF95D /* TrashButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC3D702F09048F007BF95D /* TrashButton.swift */; };
 		22EC3D742F0A76A2007BF95D /* ManageEnvironments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22EC3D732F0A7697007BF95D /* ManageEnvironments.swift */; };
@@ -31,7 +30,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		22EC3D682F07BE2F007BF95D /* ApiKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApiKeys.swift; sourceTree = "<group>"; };
 		22EC3D6A2F090141007BF95D /* ManageVaultsDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageVaultsDialog.swift; sourceTree = "<group>"; };
 		22EC3D702F09048F007BF95D /* TrashButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrashButton.swift; sourceTree = "<group>"; };
 		22EC3D732F0A7697007BF95D /* ManageEnvironments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageEnvironments.swift; sourceTree = "<group>"; };
@@ -109,7 +107,6 @@
 			children = (
 				22EC3D732F0A7697007BF95D /* ManageEnvironments.swift */,
 				22EC3D6A2F090141007BF95D /* ManageVaultsDialog.swift */,
-				22EC3D682F07BE2F007BF95D /* ApiKeys.swift */,
 				C949D4775A29 /* MainWindow.swift */,
 				903B5C781D38 /* Secrets.swift */,
 				4AAC4C3B4180 /* AddSecret.swift */,
@@ -293,7 +290,6 @@
 				993DDD4221DE /* WindowManager.swift in Sources */,
 				6A3A044C560F /* Vault0Library.swift in Sources */,
 				E618C601C16C /* Onboarding.swift in Sources */,
-				22EC3D692F07BE2F007BF95D /* ApiKeys.swift in Sources */,
 				8FFF334AD4B8 /* Login.swift in Sources */,
 				8FFF334AD4B9 /* LockScreen.swift in Sources */,
 				22EC3D742F0A76A2007BF95D /* ManageEnvironments.swift in Sources */,

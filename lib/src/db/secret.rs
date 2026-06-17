@@ -42,8 +42,6 @@ struct SecretKeyRow {
 struct SecretDataRow {
   #[diesel(sql_type = Text)]
   vault_id: String,
-  #[diesel(sql_type = Text)]
-  environment: String,
 }
 
 /// Synthetic id given to 1Password-backed secrets so update/delete can route
@@ -274,8 +272,6 @@ pub fn create(
   .bind::<BigInt, _>(now)
   .execute(&mut conn)?;
 
-  let _ = super::api_key::resync_env_and_descendants(vault_id, environment);
-
   Ok(())
 }
 
@@ -291,7 +287,7 @@ pub fn update(id: &str, value: &str) -> Result<()> {
   let mut conn = super::conn()?;
 
   let rows: Vec<SecretDataRow> =
-    sql_query("SELECT vault_id, environment FROM secrets WHERE id = ?")
+    sql_query("SELECT vault_id FROM secrets WHERE id = ?")
       .bind::<Text, _>(id)
       .load(&mut conn)?;
 
@@ -300,7 +296,6 @@ pub fn update(id: &str, value: &str) -> Result<()> {
     .ok_or_else(|| anyhow::anyhow!("Secret not found"))?;
 
   let vault_id = row.vault_id.clone();
-  let environment = row.environment.clone();
 
   let vault_key = session::get_vault_key(&vault_id)?;
   let encrypted_value =
@@ -313,8 +308,6 @@ pub fn update(id: &str, value: &str) -> Result<()> {
     .bind::<BigInt, _>(now)
     .bind::<Text, _>(id)
     .execute(&mut conn)?;
-
-  let _ = super::api_key::resync_env_and_descendants(&vault_id, &environment);
 
   Ok(())
 }
@@ -330,23 +323,9 @@ pub fn delete(id: &str) -> Result<()> {
 
   let mut conn = super::conn()?;
 
-  let rows: Vec<SecretDataRow> =
-    sql_query("SELECT vault_id, environment FROM secrets WHERE id = ?")
-      .bind::<Text, _>(id)
-      .load(&mut conn)?;
-  let location = rows
-    .first()
-    .map(|r| (r.vault_id.clone(), r.environment.clone()));
-
   sql_query("DELETE FROM secrets WHERE id = ?")
     .bind::<Text, _>(id)
     .execute(&mut conn)?;
-
-  let _ = super::api_key::delete_for_secret(id);
-
-  if let Some((vault_id, environment)) = location {
-    let _ = super::api_key::resync_env_and_descendants(&vault_id, &environment);
-  }
 
   Ok(())
 }

@@ -9,15 +9,9 @@ struct MainWindowView: View {
     @State private var isLoading: Bool = false
     @State private var showingAddVault: Bool = false
     @State private var showingSettings: Bool = false
-    @State private var selectedTab: Tab = .secrets
     @State private var vaultEnvironments: [String] = []
     @State private var environmentItems: [EnvironmentItem] = []
     @State private var opLoadToken: Int = 0
-
-    enum Tab: String, CaseIterable {
-        case secrets = "Secrets"
-        case apiKeys = "API Keys"
-    }
 
     var body: some View {
         HSplitView {
@@ -112,27 +106,15 @@ struct MainWindowView: View {
             } else if vaultEnvironments.isEmpty {
                 noEnvironmentsPrompt
             } else {
-                ContentTabPicker(selectedTab: $selectedTab)
-
-                switch selectedTab {
-                case .secrets:
-                    SecretsListView(
-                        vaultId: selectedVaultId,
-                        selectedEnvironment: selectedEnvironment,
-                        environments: vaultEnvironments,
-                        environmentItems: environmentItems,
-                        secrets: $secrets,
-                        isLoading: $isLoading,
-                        onRefresh: refreshVaultData,
-                    )
-                case .apiKeys:
-                    ManageApiKeys(
-                        selectedVaultId: selectedVaultId,
-                        selectedEnvironment: selectedEnvironment,
-                        vaults: vaults,
-                        onRefresh: refreshData,
-                    )
-                }
+                SecretsListView(
+                    vaultId: selectedVaultId,
+                    selectedEnvironment: selectedEnvironment,
+                    environments: vaultEnvironments,
+                    environmentItems: environmentItems,
+                    secrets: $secrets,
+                    isLoading: $isLoading,
+                    onRefresh: refreshVaultData,
+                )
             }
         }
         .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
@@ -523,39 +505,5 @@ struct SidebarEnvironmentButton: View {
             .foregroundColor(isSelected ? .vault0Accent : .primary)
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct ContentTabPicker: View {
-    @Binding var selectedTab: MainWindowView.Tab
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(MainWindowView.Tab.allCases, id: \.self) { tab in
-                    Button(action: { selectedTab = tab }) {
-                        VStack(spacing: 0) {
-                            HStack(spacing: 0) {
-                                Image(systemName: tab == .secrets ? "key.fill" : "person.badge.key.fill")
-                                    .font(.system(size: 12))
-                                Text(tab.rawValue)
-                                    .font(.system(size: 13, weight: .medium))
-                            }
-                            .foregroundColor(selectedTab == tab ? .vault0Accent : .secondary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-
-                            Rectangle()
-                                .fill(selectedTab == tab ? Color.vault0Accent : Color.clear)
-                                .frame(height: 2)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
     }
 }

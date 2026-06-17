@@ -79,18 +79,6 @@ pub fn clear_config(vault_id: &str, env_name: &str) -> Result<()> {
 fn delete_local_secrets(vault_id: &str, env_name: &str) -> Result<()> {
   let mut conn = super::conn()?;
 
-  sql_query(
-    "DELETE FROM api_key_secrets WHERE secret_id IN (SELECT id FROM secrets WHERE vault_id = ? AND environment = ?)",
-  )
-  .bind::<Text, _>(vault_id)
-  .bind::<Text, _>(env_name)
-  .execute(&mut conn)?;
-
-  sql_query("DELETE FROM api_keys WHERE vault_id = ? AND environment = ?")
-    .bind::<Text, _>(vault_id)
-    .bind::<Text, _>(env_name)
-    .execute(&mut conn)?;
-
   sql_query("DELETE FROM secrets WHERE vault_id = ? AND environment = ?")
     .bind::<Text, _>(vault_id)
     .bind::<Text, _>(env_name)

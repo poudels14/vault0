@@ -7,8 +7,8 @@ use tokio::sync::oneshot;
 use tokio_serde::formats::Bincode;
 
 use crate::rpc::{
-  ApiKeyLoadResponse, EncryptedSecretEntry, EnvironmentInfo, ImportPreview,
-  ImportResolution, ImportResult, Vault0Service, VaultInfo,
+  EnvironmentInfo, ImportPreview, ImportResolution, ImportResult,
+  Vault0Service, VaultInfo,
 };
 use crate::{db, session};
 
@@ -84,43 +84,6 @@ impl Vault0Service for Vault0Server {
     tokio::task::spawn_blocking(move || {
       db::secret::create(&vault_id, &environment, &key, &value)
         .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-  }
-
-  async fn load_with_api_key(
-    self,
-    _: tarpc::context::Context,
-    api_key: String,
-  ) -> Result<ApiKeyLoadResponse, String> {
-    tokio::task::spawn_blocking(move || {
-      let claims = db::api_key::verify_and_decode_jwt(&api_key)
-        .map_err(|e| format!("JWT verification failed: {}", e))?;
-
-      let encrypted_secrets =
-        db::api_key::get_encrypted_secrets(&claims.api_key_id)
-          .map_err(|e| format!("Failed to load secrets: {}", e))?;
-
-      if let Err(e) = db::api_key::update_last_used(&claims.api_key_id) {
-        log::warn!("Failed to update last_used_at: {}", e);
-      }
-
-      Ok(ApiKeyLoadResponse {
-        api_key_id: claims.api_key_id,
-        vault_id: claims.vault_id,
-        environment: claims.environment,
-        name: claims.name,
-        secrets: encrypted_secrets
-          .into_iter()
-          .map(|s| EncryptedSecretEntry {
-            encrypted_key: s.encrypted_key,
-            key_nonce: s.key_nonce,
-            encrypted_value: s.encrypted_value,
-            value_nonce: s.value_nonce,
-          })
-          .collect(),
-      })
     })
     .await
     .map_err(|e| e.to_string())?

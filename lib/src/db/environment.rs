@@ -110,36 +110,6 @@ pub fn resolve_chain(vault_id: &str, name: &str) -> Result<Vec<String>> {
   Ok(chain)
 }
 
-/// Names of environments that directly or transitively inherit from `name`,
-/// including `name` itself. Used to find which API key snapshots must be
-/// rebuilt when secrets in an environment change.
-pub fn descendants_inclusive(
-  vault_id: &str,
-  name: &str,
-) -> Result<Vec<String>> {
-  let mut conn = super::conn()?;
-  let rows = load_rows(&mut conn, vault_id)?;
-
-  let mut result = vec![name.to_string()];
-  let mut i = 0;
-  while i < result.len() {
-    let current = result[i].clone();
-    let current_id = rows.iter().find(|r| r.name == current).map(|r| &r.id);
-    if let Some(current_id) = current_id {
-      for row in &rows {
-        if row.parent_id.as_ref() == Some(current_id)
-          && !result.contains(&row.name)
-        {
-          result.push(row.name.clone());
-        }
-      }
-    }
-    i += 1;
-  }
-
-  Ok(result)
-}
-
 pub fn create(vault_id: &str, name: &str, parent: Option<&str>) -> Result<()> {
   let mut conn = super::conn()?;
   let name_lower = name.trim().to_lowercase();
@@ -334,9 +304,6 @@ pub fn set_parent(
     bail!("Environment '{}' not found", name_lower);
   }
 
-  // Resolution changed for this environment and everything inheriting from it.
-  let _ = super::api_key::resync_env_and_descendants(vault_id, &name_lower);
-
   Ok(())
 }
 
@@ -395,8 +362,6 @@ pub fn clone(vault_id: &str, source_name: &str, new_name: &str) -> Result<()> {
     .execute(&mut conn)?;
   }
 
-  let _ = super::api_key::resync_env_and_descendants(vault_id, new_name);
-
   Ok(())
 }
 
@@ -429,18 +394,6 @@ pub fn delete(vault_id: &str, name: &str) -> Result<()> {
   if child_rows.first().map(|r| r.count).unwrap_or(0) > 0 {
     bail!("Cannot delete an environment that has child environments. Reassign or delete its children first.");
   }
-
-  sql_query(
-    "DELETE FROM api_key_secrets WHERE secret_id IN (SELECT id FROM secrets WHERE vault_id = ? AND environment = ?)",
-  )
-  .bind::<Text, _>(vault_id)
-  .bind::<Text, _>(name)
-  .execute(&mut conn)?;
-
-  sql_query("DELETE FROM api_keys WHERE vault_id = ? AND environment = ?")
-    .bind::<Text, _>(vault_id)
-    .bind::<Text, _>(name)
-    .execute(&mut conn)?;
 
   sql_query("DELETE FROM secrets WHERE vault_id = ? AND environment = ?")
     .bind::<Text, _>(vault_id)
@@ -481,7 +434,7 @@ mod tests {
   }
 
   #[test]
-  fn test_resolve_chain_and_descendants() {
+  fn test_resolve_chain() {
     let _g = super::super::test_guard();
     let vault_id = fresh_vault("chain");
 
@@ -495,13 +448,10 @@ mod tests {
       resolve_chain(&vault_id, "feature").unwrap(),
       vec!["base", "staging", "feature"]
     );
-
-    let mut desc = descendants_inclusive(&vault_id, "base").unwrap();
-    desc.sort();
-    assert_eq!(desc, vec!["base", "feature", "prod", "staging"]);
-
-    let leaf = descendants_inclusive(&vault_id, "feature").unwrap();
-    assert_eq!(leaf, vec!["feature"]);
+    assert_eq!(
+      resolve_chain(&vault_id, "prod").unwrap(),
+      vec!["base", "prod"]
+    );
   }
 
   #[test]
