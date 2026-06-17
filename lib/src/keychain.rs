@@ -85,6 +85,46 @@ mod security_framework_impl {
       })
       .is_ok()
   }
+
+  // Per-environment 1Password service account token. One keychain item per
+  // environment id so tokens can differ across environments.
+  const OP_TOKEN_ACCOUNT: &str = "service_account";
+
+  fn op_token_service(environment_id: &str) -> String {
+    format!("dev.vault0.op_token.{}", environment_id)
+  }
+
+  pub fn save_op_token(environment_id: &str, token: &str) -> Result<()> {
+    let _ = delete_op_token(environment_id);
+    SecKeychain::default()?.add_generic_password(
+      &op_token_service(environment_id),
+      OP_TOKEN_ACCOUNT,
+      token.as_bytes(),
+    )?;
+    Ok(())
+  }
+
+  pub fn get_op_token(environment_id: &str) -> Result<String> {
+    let (password, _) = SecKeychain::default()?
+      .find_generic_password(&op_token_service(environment_id), OP_TOKEN_ACCOUNT)
+      .map_err(|_| {
+        anyhow::anyhow!(
+          "1Password token not found for this environment. Re-configure 1Password."
+        )
+      })?;
+    Ok(String::from_utf8(password.to_vec())?)
+  }
+
+  pub fn delete_op_token(environment_id: &str) -> Result<()> {
+    let keychain = SecKeychain::default()?;
+    if let Ok((_, item)) = keychain.find_generic_password(
+      &op_token_service(environment_id),
+      OP_TOKEN_ACCOUNT,
+    ) {
+      item.delete();
+    }
+    Ok(())
+  }
 }
 
 #[cfg(target_os = "macos")]
@@ -128,4 +168,19 @@ pub fn delete_ecdsa_private_key() -> Result<()> {
 #[cfg(not(target_os = "macos"))]
 pub fn has_ecdsa_private_key() -> bool {
   false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn save_op_token(_environment_id: &str, _token: &str) -> Result<()> {
+  anyhow::bail!("Keychain access is only supported on macOS")
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn get_op_token(_environment_id: &str) -> Result<String> {
+  anyhow::bail!("1Password token not found")
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn delete_op_token(_environment_id: &str) -> Result<()> {
+  Ok(())
 }

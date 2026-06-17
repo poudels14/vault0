@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 mod crypto;
 mod db;
 mod keychain;
+mod op;
 mod server;
 mod session;
 
@@ -448,6 +449,166 @@ pub extern "C" fn vault0_clone_environment(
     };
 
     match db::environment::clone(vault_id_str, source_str, new_str) {
+      Ok(_) => true,
+      Err(e) => {
+        eprintln!("{}", e);
+        false
+      }
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_op_check() -> bool {
+  op::ensure_available().is_ok()
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_op_list_vaults(token: *const c_char) -> *mut c_char {
+  unsafe {
+    let token_str = match CStr::from_ptr(token).to_str() {
+      Ok(s) => s,
+      Err(_) => return std::ptr::null_mut(),
+    };
+
+    match op::list_vaults(token_str) {
+      Ok(vaults) => match serde_json::to_string(&vaults) {
+        Ok(json) => to_c_string(&json),
+        Err(_) => std::ptr::null_mut(),
+      },
+      Err(e) => {
+        eprintln!("{}", e);
+        std::ptr::null_mut()
+      }
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_op_list_items(
+  token: *const c_char,
+  vault: *const c_char,
+) -> *mut c_char {
+  unsafe {
+    let token_str = match CStr::from_ptr(token).to_str() {
+      Ok(s) => s,
+      Err(_) => return std::ptr::null_mut(),
+    };
+    let vault_str = match CStr::from_ptr(vault).to_str() {
+      Ok(s) => s,
+      Err(_) => return std::ptr::null_mut(),
+    };
+
+    match op::list_items(token_str, vault_str) {
+      Ok(items) => match serde_json::to_string(&items) {
+        Ok(json) => to_c_string(&json),
+        Err(_) => std::ptr::null_mut(),
+      },
+      Err(e) => {
+        eprintln!("{}", e);
+        std::ptr::null_mut()
+      }
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_configure_op_environment(
+  vault_id: *const c_char,
+  env_name: *const c_char,
+  token: *const c_char,
+  op_vault: *const c_char,
+  op_item: *const c_char,
+) -> bool {
+  op_environment_apply(vault_id, env_name, token, op_vault, op_item, false)
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_update_op_environment(
+  vault_id: *const c_char,
+  env_name: *const c_char,
+  token: *const c_char,
+  op_vault: *const c_char,
+  op_item: *const c_char,
+) -> bool {
+  op_environment_apply(vault_id, env_name, token, op_vault, op_item, true)
+}
+
+fn op_environment_apply(
+  vault_id: *const c_char,
+  env_name: *const c_char,
+  token: *const c_char,
+  op_vault: *const c_char,
+  op_item: *const c_char,
+  update: bool,
+) -> bool {
+  unsafe {
+    let (vault_id, env_name, token, op_vault, op_item) = match (
+      CStr::from_ptr(vault_id).to_str(),
+      CStr::from_ptr(env_name).to_str(),
+      CStr::from_ptr(token).to_str(),
+      CStr::from_ptr(op_vault).to_str(),
+      CStr::from_ptr(op_item).to_str(),
+    ) {
+      (Ok(a), Ok(b), Ok(c), Ok(d), Ok(e)) => (a, b, c, d, e),
+      _ => return false,
+    };
+
+    let result = if update {
+      db::op_env::update_config(vault_id, env_name, token, op_vault, op_item)
+    } else {
+      db::op_env::configure(vault_id, env_name, token, op_vault, op_item)
+    };
+
+    match result {
+      Ok(_) => true,
+      Err(e) => {
+        eprintln!("{}", e);
+        false
+      }
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_clear_op_environment(
+  vault_id: *const c_char,
+  env_name: *const c_char,
+) -> bool {
+  unsafe {
+    let vault_id_str = match CStr::from_ptr(vault_id).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+    let env_str = match CStr::from_ptr(env_name).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    match db::op_env::clear_config(vault_id_str, env_str) {
+      Ok(_) => true,
+      Err(e) => {
+        eprintln!("{}", e);
+        false
+      }
+    }
+  }
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_get_op_cli_path() -> *mut c_char {
+  to_c_string(&db::settings::get_op_cli_path())
+}
+
+#[no_mangle]
+pub extern "C" fn vault0_set_op_cli_path(path: *const c_char) -> bool {
+  unsafe {
+    let path_str = match CStr::from_ptr(path).to_str() {
+      Ok(s) => s,
+      Err(_) => return false,
+    };
+
+    match db::settings::set_op_cli_path(path_str) {
       Ok(_) => true,
       Err(e) => {
         eprintln!("{}", e);

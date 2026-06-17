@@ -32,6 +32,10 @@ pub struct EnvironmentResponse {
   pub display_order: i64,
   // id of the parent environment this one inherits from, if any.
   pub parent_id: Option<String>,
+  // When set, this environment is backed by 1Password: its secrets live in the
+  // given 1Password vault/item and are accessed via the `op` CLI, not sqlite.
+  pub op_vault: Option<String>,
+  pub op_item: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

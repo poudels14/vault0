@@ -2,6 +2,7 @@ pub mod api_key;
 pub mod auth;
 pub mod environment;
 pub mod export;
+pub mod op_env;
 pub mod secret;
 pub mod settings;
 pub mod vault;
@@ -93,6 +94,10 @@ fn run_migrations(pool: &DbPool) -> Result<()> {
     (
       2,
       include_str!("../../migrations/002_environment_parent.sql"),
+    ),
+    (
+      3,
+      include_str!("../../migrations/003_environment_onepassword.sql"),
     ),
   ];
 

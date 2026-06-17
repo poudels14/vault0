@@ -20,6 +20,10 @@ struct EnvironmentRow {
   display_order: i64,
   #[diesel(sql_type = Nullable<Text>)]
   parent_id: Option<String>,
+  #[diesel(sql_type = Nullable<Text>)]
+  op_vault: Option<String>,
+  #[diesel(sql_type = Nullable<Text>)]
+  op_item: Option<String>,
 }
 
 #[derive(QueryableByName)]
@@ -38,7 +42,7 @@ pub fn list(vault_id: &str) -> Result<Vec<EnvironmentResponse>> {
   let mut conn = super::conn()?;
 
   let rows: Vec<EnvironmentRow> = sql_query(
-    "SELECT id, name, created_at, display_order, parent_id FROM vault_environments WHERE vault_id = ? ORDER BY display_order",
+    "SELECT id, name, created_at, display_order, parent_id, op_vault, op_item FROM vault_environments WHERE vault_id = ? ORDER BY display_order",
   )
   .bind::<Text, _>(vault_id)
   .load(&mut conn)?;
@@ -52,6 +56,8 @@ pub fn list(vault_id: &str) -> Result<Vec<EnvironmentResponse>> {
         created_at: r.created_at,
         display_order: r.display_order,
         parent_id: r.parent_id,
+        op_vault: r.op_vault,
+        op_item: r.op_item,
       })
       .collect(),
   )
@@ -63,7 +69,7 @@ fn load_rows(
 ) -> Result<Vec<EnvironmentRow>> {
   Ok(
     sql_query(
-      "SELECT id, name, created_at, display_order, parent_id FROM vault_environments WHERE vault_id = ?",
+      "SELECT id, name, created_at, display_order, parent_id, op_vault, op_item FROM vault_environments WHERE vault_id = ?",
     )
     .bind::<Text, _>(vault_id)
     .load(conn)?,
@@ -182,7 +188,7 @@ fn resolve_parent_id(
   parent_name: &str,
 ) -> Result<String> {
   let rows: Vec<EnvironmentRow> = sql_query(
-    "SELECT id, name, created_at, display_order, parent_id FROM vault_environments WHERE vault_id = ? AND name = ?",
+    "SELECT id, name, created_at, display_order, parent_id, op_vault, op_item FROM vault_environments WHERE vault_id = ? AND name = ?",
   )
   .bind::<Text, _>(vault_id)
   .bind::<Text, _>(parent_name)
@@ -191,6 +197,103 @@ fn resolve_parent_id(
   rows.first().map(|r| r.id.clone()).ok_or_else(|| {
     anyhow::anyhow!("Parent environment '{}' not found", parent_name)
   })
+}
+
+/// Returns the id of an environment by name.
+pub fn id_for(vault_id: &str, name: &str) -> Result<String> {
+  let mut conn = super::conn()?;
+  let rows: Vec<EnvironmentRow> = sql_query(
+    "SELECT id, name, created_at, display_order, parent_id, op_vault, op_item FROM vault_environments WHERE vault_id = ? AND name = ?",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(name)
+  .load(&mut conn)?;
+
+  rows
+    .first()
+    .map(|r| r.id.clone())
+    .ok_or_else(|| anyhow::anyhow!("Environment '{}' not found", name))
+}
+
+/// 1Password backing for an environment: the env's secrets live in this
+/// 1Password vault/item and are read/written via the `op` CLI.
+pub struct OpEnvConfig {
+  pub env_id: String,
+  pub op_vault: String,
+  pub op_item: String,
+}
+
+fn op_config_from_row(row: EnvironmentRow) -> Option<OpEnvConfig> {
+  match (row.op_vault, row.op_item) {
+    (Some(op_vault), Some(op_item)) => Some(OpEnvConfig {
+      env_id: row.id,
+      op_vault,
+      op_item,
+    }),
+    _ => None,
+  }
+}
+
+/// Returns the 1Password config for an environment by name, or None when the
+/// environment stores its secrets locally.
+pub fn op_config(vault_id: &str, name: &str) -> Result<Option<OpEnvConfig>> {
+  let mut conn = super::conn()?;
+  let rows: Vec<EnvironmentRow> = sql_query(
+    "SELECT id, name, created_at, display_order, parent_id, op_vault, op_item FROM vault_environments WHERE vault_id = ? AND name = ?",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(name)
+  .load(&mut conn)?;
+
+  Ok(rows.into_iter().next().and_then(op_config_from_row))
+}
+
+/// Same as `op_config` but looked up by environment id (used to route updates
+/// of op-backed secrets whose synthetic id encodes the env id).
+pub fn op_config_by_id(env_id: &str) -> Result<Option<OpEnvConfig>> {
+  let mut conn = super::conn()?;
+  let rows: Vec<EnvironmentRow> = sql_query(
+    "SELECT id, name, created_at, display_order, parent_id, op_vault, op_item FROM vault_environments WHERE id = ?",
+  )
+  .bind::<Text, _>(env_id)
+  .load(&mut conn)?;
+
+  Ok(rows.into_iter().next().and_then(op_config_from_row))
+}
+
+/// Stores the 1Password vault/item on an environment, marking it op-backed.
+pub fn set_op_config(
+  vault_id: &str,
+  name: &str,
+  op_vault: &str,
+  op_item: &str,
+) -> Result<()> {
+  let mut conn = super::conn()?;
+  let updated = sql_query(
+    "UPDATE vault_environments SET op_vault = ?, op_item = ? WHERE vault_id = ? AND name = ?",
+  )
+  .bind::<Text, _>(op_vault)
+  .bind::<Text, _>(op_item)
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(name)
+  .execute(&mut conn)?;
+
+  if updated == 0 {
+    bail!("Environment '{}' not found", name);
+  }
+  Ok(())
+}
+
+/// Clears the 1Password backing, reverting the environment to local storage.
+pub fn clear_op_config(vault_id: &str, name: &str) -> Result<()> {
+  let mut conn = super::conn()?;
+  sql_query(
+    "UPDATE vault_environments SET op_vault = NULL, op_item = NULL WHERE vault_id = ? AND name = ?",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(name)
+  .execute(&mut conn)?;
+  Ok(())
 }
 
 /// Sets (or clears, when `parent` is None) the parent of an environment.

@@ -80,6 +80,14 @@ pub struct EncryptedSecret {
 }
 
 pub fn create(request: &CreateApiKeyRequest) -> Result<ApiKeyResponse> {
+  if super::environment::op_config(&request.vault_id, &request.environment)?
+    .is_some()
+  {
+    anyhow::bail!(
+      "API keys are not supported for 1Password-backed environments"
+    );
+  }
+
   let mut conn = super::conn()?;
   let master_key = session::get_master_key()?;
 

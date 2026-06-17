@@ -6,8 +6,42 @@ struct Vault0App: App {
 
     var body: some Scene {
         Settings {
-            EmptyView()
+            OpSettingsView()
         }
+    }
+}
+
+struct OpSettingsView: View {
+    @State private var opPath = Vault0Library.shared.getOpCliPath()
+    @State private var status: String?
+
+    var body: some View {
+        Form {
+            Section("1Password CLI") {
+                TextField("op", text: $opPath)
+                    .textFieldStyle(.roundedBorder)
+                Text("Path to the 1Password `op` CLI. Use \"op\" to resolve from PATH.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack {
+                    Button("Save") {
+                        _ = Vault0Library.shared.setOpCliPath(opPath)
+                        status = "Saved"
+                    }
+                    Button("Verify") {
+                        _ = Vault0Library.shared.setOpCliPath(opPath)
+                        status = Vault0Library.shared.opCheck()
+                            ? "1Password CLI found"
+                            : "1Password CLI not found"
+                    }
+                    if let status {
+                        Text(status).font(.caption).foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
     }
 }
 

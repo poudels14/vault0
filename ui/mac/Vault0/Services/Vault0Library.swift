@@ -243,6 +243,83 @@ class Vault0Library {
         }
     }
 
+    func opCheck() -> Bool {
+        vault0_op_check()
+    }
+
+    private func decodeOpEntries(_ ptr: UnsafeMutablePointer<CChar>?) -> [OpEntry] {
+        guard let ptr else { return [] }
+        defer { vault0_free_string(ptr) }
+        let jsonString = String(cString: ptr)
+        guard let data = jsonString.data(using: .utf8) else { return [] }
+        do {
+            return try JSONDecoder().decode([OpEntry].self, from: data)
+        } catch {
+            NSLog("Failed to decode op entries: \(error)")
+            return []
+        }
+    }
+
+    func opListVaults(token: String) -> [OpEntry] {
+        decodeOpEntries(token.withCString { vault0_op_list_vaults($0) })
+    }
+
+    func opListItems(token: String, vault: String) -> [OpEntry] {
+        decodeOpEntries(
+            token.withCString { t in vault.withCString { v in vault0_op_list_items(t, v) } },
+        )
+    }
+
+    func configureOpEnvironment(
+        vaultId: String, envName: String, token: String, opVault: String, opItem: String,
+    ) -> Bool {
+        vaultId.withCString { vId in
+            envName.withCString { n in
+                token.withCString { t in
+                    opVault.withCString { v in
+                        opItem.withCString { i in
+                            vault0_configure_op_environment(vId, n, t, v, i)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func updateOpEnvironment(
+        vaultId: String, envName: String, token: String, opVault: String, opItem: String,
+    ) -> Bool {
+        vaultId.withCString { vId in
+            envName.withCString { n in
+                token.withCString { t in
+                    opVault.withCString { v in
+                        opItem.withCString { i in
+                            vault0_update_op_environment(vId, n, t, v, i)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func clearOpEnvironment(vaultId: String, envName: String) -> Bool {
+        vaultId.withCString { vId in
+            envName.withCString { n in
+                vault0_clear_op_environment(vId, n)
+            }
+        }
+    }
+
+    func getOpCliPath() -> String {
+        guard let ptr = vault0_get_op_cli_path() else { return "op" }
+        defer { vault0_free_string(ptr) }
+        return String(cString: ptr)
+    }
+
+    func setOpCliPath(_ path: String) -> Bool {
+        path.withCString { vault0_set_op_cli_path($0) }
+    }
+
     func startServer() -> Bool {
         let result = vault0_server_start()
         NSLog(result ? "Server started successfully" : "Failed to start server")

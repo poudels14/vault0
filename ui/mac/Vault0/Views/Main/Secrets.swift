@@ -651,73 +651,68 @@ struct EditSecretSheet: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Value")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.vault0TextSecondary)
-                    HStack(alignment: .top, spacing: 8) {
-                        Group {
-                            if showValue {
-                                ZStack(alignment: .topLeading) {
-                                    if value.isEmpty {
-                                        Text("Enter value")
-                                            .font(.system(size: 13))
-                                            .foregroundColor(.vault0TextTertiary)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 14)
-                                            .allowsHitTesting(false)
-                                    }
+                    HStack {
+                        Text("Value")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.vault0TextSecondary)
+                        Spacer()
+                        Button(action: { showValue.toggle() }) {
+                            Image(systemName: showValue ? "eye.slash" : "eye")
+                                .font(.system(size: 12))
+                                .foregroundColor(.vault0TextSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(showValue ? "Hide value" : "Show value")
+                    }
 
-                                    TextEditor(text: $value)
-                                        .font(.system(size: 13, design: .monospaced))
-                                        .foregroundColor(.vault0TextPrimary)
-                                        .scrollContentBackground(.hidden)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 6)
+                    Group {
+                        if showValue {
+                            ZStack(alignment: .topLeading) {
+                                if value.isEmpty {
+                                    Text("Enter value")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.vault0TextTertiary)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 14)
+                                        .allowsHitTesting(false)
                                 }
-                                .frame(height: 96)
+
+                                TextEditor(text: $value)
+                                    .font(.system(size: 13, design: .monospaced))
+                                    .foregroundColor(.vault0TextPrimary)
+                                    .scrollContentBackground(.hidden)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .background(Color.vault0Background)
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.vault0Border, lineWidth: 1),
+                            )
+                        } else {
+                            Text(maskedPreviewText)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(value.isEmpty ? .vault0TextTertiary : .vault0TextSecondary)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
                                 .background(Color.vault0Background)
                                 .cornerRadius(8)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
                                         .stroke(Color.vault0Border, lineWidth: 1),
                                 )
-                            } else {
-                                Text(maskedPreviewText)
-                                    .font(.system(size: 13, design: .monospaced))
-                                    .foregroundColor(value.isEmpty ? .vault0TextTertiary : .vault0TextSecondary)
-                                    .lineLimit(4)
-                                    .truncationMode(.tail)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .frame(height: 96)
-                                    .background(Color.vault0Background)
-                                    .cornerRadius(8)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.vault0Border, lineWidth: 1),
-                                    )
-                            }
                         }
-                        .frame(minWidth: 0, maxWidth: .infinity)
-                        .layoutPriority(1)
-                        Button(action: { showValue.toggle() }) {
-                            Image(systemName: showValue ? "eye.slash" : "eye")
-                                .font(.system(size: 13))
-                                .foregroundColor(.vault0TextSecondary)
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.vault0Surface),
-                                )
-                        }
-                        .buttonStyle(.plain)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .frame(maxHeight: .infinity)
             }
             .padding(20)
-
-            Spacer()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
                 .background(Color.vault0Border)
@@ -740,7 +735,7 @@ struct EditSecretSheet: View {
             }
             .padding(20)
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 520)
         .background(Color.vault0Background)
     }
 }

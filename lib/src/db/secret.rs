@@ -46,29 +46,81 @@ struct SecretDataRow {
   environment: String,
 }
 
+/// Synthetic id given to 1Password-backed secrets so update/delete can route
+/// back to the right environment and key. Format: `op:{env_id}:{key}`. The
+/// env id is a colonless UUID, so the key may itself contain ':'.
+const OP_ID_PREFIX: &str = "op:";
+
+fn op_secret_id(env_id: &str, key: &str) -> String {
+  format!("{}{}:{}", OP_ID_PREFIX, env_id, key)
+}
+
+fn parse_op_secret_id(id: &str) -> Option<(String, String)> {
+  let rest = id.strip_prefix(OP_ID_PREFIX)?;
+  let (env_id, key) = rest.split_once(':')?;
+  Some((env_id.to_string(), key.to_string()))
+}
+
+fn list_op(
+  vault_id: &str,
+  environment: &str,
+  cfg: &super::environment::OpEnvConfig,
+) -> Result<Vec<SecretResponse>> {
+  let token = crate::keychain::get_op_token(&cfg.env_id)?;
+  let fields = crate::op::get_fields(&token, &cfg.op_vault, &cfg.op_item)?;
+
+  Ok(
+    fields
+      .into_iter()
+      .map(|(key, value)| SecretResponse {
+        id: op_secret_id(&cfg.env_id, &key),
+        vault_id: vault_id.to_string(),
+        environment: environment.to_string(),
+        key,
+        value,
+        created_at: 0,
+        updated_at: 0,
+        inherited: false,
+      })
+      .collect(),
+  )
+}
+
 pub fn list(
   vault_id: &str,
   environment: Option<&str>,
 ) -> Result<Vec<SecretResponse>> {
+  let env = match environment {
+    Some(env) => env,
+    None => {
+      // Aggregate local secrets across environments. 1Password-backed envs are
+      // skipped here so opening a vault doesn't shell out to `op` for every
+      // linked env; their secrets are fetched on demand when selected.
+      let mut all = Vec::new();
+      for e in super::environment::list(vault_id)? {
+        if e.op_item.is_some() {
+          continue;
+        }
+        all.extend(list(vault_id, Some(&e.name))?);
+      }
+      return Ok(all);
+    }
+  };
+
+  if let Some(cfg) = super::environment::op_config(vault_id, env)? {
+    return list_op(vault_id, env, &cfg);
+  }
+
   let mut conn = super::conn()?;
   let vault_key = session::get_vault_key(vault_id)?;
 
-  let rows: Vec<SecretRow> = if let Some(env) = environment {
-    sql_query(
-      "SELECT id, vault_id, environment, encrypted_key, encrypted_value, key_nonce, value_nonce, created_at, updated_at
-       FROM secrets WHERE vault_id = ? AND environment = ?",
-    )
-    .bind::<Text, _>(vault_id)
-    .bind::<Text, _>(env)
-    .load(&mut conn)?
-  } else {
-    sql_query(
-      "SELECT id, vault_id, environment, encrypted_key, encrypted_value, key_nonce, value_nonce, created_at, updated_at
-       FROM secrets WHERE vault_id = ?",
-    )
-    .bind::<Text, _>(vault_id)
-    .load(&mut conn)?
-  };
+  let rows: Vec<SecretRow> = sql_query(
+    "SELECT id, vault_id, environment, encrypted_key, encrypted_value, key_nonce, value_nonce, created_at, updated_at
+     FROM secrets WHERE vault_id = ? AND environment = ?",
+  )
+  .bind::<Text, _>(vault_id)
+  .bind::<Text, _>(env)
+  .load(&mut conn)?;
 
   let mut secrets = Vec::new();
 
@@ -186,6 +238,12 @@ pub fn create(
     bail!("Environment and key cannot contain spaces");
   }
 
+  if let Some(cfg) = super::environment::op_config(vault_id, environment)? {
+    let token = crate::keychain::get_op_token(&cfg.env_id)?;
+    crate::op::set_field(&token, &cfg.op_vault, &cfg.op_item, key, value)?;
+    return Ok(());
+  }
+
   let mut conn = super::conn()?;
   let vault_key = session::get_vault_key(vault_id)?;
 
@@ -222,6 +280,14 @@ pub fn create(
 }
 
 pub fn update(id: &str, value: &str) -> Result<()> {
+  if let Some((env_id, key)) = parse_op_secret_id(id) {
+    let cfg = super::environment::op_config_by_id(&env_id)?
+      .ok_or_else(|| anyhow::anyhow!("Environment is not 1Password-backed"))?;
+    let token = crate::keychain::get_op_token(&cfg.env_id)?;
+    crate::op::set_field(&token, &cfg.op_vault, &cfg.op_item, &key, value)?;
+    return Ok(());
+  }
+
   let mut conn = super::conn()?;
 
   let rows: Vec<SecretDataRow> =
@@ -254,6 +320,14 @@ pub fn update(id: &str, value: &str) -> Result<()> {
 }
 
 pub fn delete(id: &str) -> Result<()> {
+  if let Some((env_id, key)) = parse_op_secret_id(id) {
+    let cfg = super::environment::op_config_by_id(&env_id)?
+      .ok_or_else(|| anyhow::anyhow!("Environment is not 1Password-backed"))?;
+    let token = crate::keychain::get_op_token(&cfg.env_id)?;
+    crate::op::delete_field(&token, &cfg.op_vault, &cfg.op_item, &key)?;
+    return Ok(());
+  }
+
   let mut conn = super::conn()?;
 
   let rows: Vec<SecretDataRow> =
@@ -275,4 +349,35 @@ pub fn delete(id: &str) -> Result<()> {
   }
 
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_op_secret_id_round_trip() {
+    let env_id = "550e8400-e29b-41d4-a716-446655440000";
+    let id = op_secret_id(env_id, "API_KEY");
+    assert_eq!(
+      parse_op_secret_id(&id),
+      Some((env_id.into(), "API_KEY".into()))
+    );
+
+    // Keys may contain ':' since the env id is a colonless UUID.
+    let id = op_secret_id(env_id, "weird:key:name");
+    assert_eq!(
+      parse_op_secret_id(&id),
+      Some((env_id.into(), "weird:key:name".into()))
+    );
+  }
+
+  #[test]
+  fn test_parse_op_secret_id_ignores_local_ids() {
+    assert_eq!(
+      parse_op_secret_id("550e8400-e29b-41d4-a716-446655440000"),
+      None
+    );
+    assert_eq!(parse_op_secret_id("not-an-op-id"), None);
+  }
 }

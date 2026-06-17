@@ -12,6 +12,7 @@ struct MainWindowView: View {
     @State private var selectedTab: Tab = .secrets
     @State private var vaultEnvironments: [String] = []
     @State private var environmentItems: [EnvironmentItem] = []
+    @State private var opLoadToken: Int = 0
 
     enum Tab: String, CaseIterable {
         case secrets = "Secrets"
@@ -19,7 +20,7 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        NavigationView {
+        HSplitView {
             sidebarContent
             mainContent
         }
@@ -53,6 +54,9 @@ struct MainWindowView: View {
         }
         .onChange(of: selectedVaultId) { _ in
             refreshVaultData()
+        }
+        .onChange(of: selectedEnvironment) { _ in
+            loadSelectedEnvironmentSecrets()
         }
         .onChange(of: vaults) { newVaults in
             if let vaultId = selectedVaultId {
@@ -98,7 +102,7 @@ struct MainWindowView: View {
 
             Spacer()
         }
-        .frame(minWidth: 200)
+        .frame(minWidth: 260, idealWidth: 260, maxWidth: 420)
     }
 
     private var mainContent: some View {
@@ -131,6 +135,8 @@ struct MainWindowView: View {
                 }
             }
         }
+        .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
+        .layoutPriority(1)
     }
 
     private var selectVaultPrompt: some View {
@@ -217,6 +223,8 @@ struct MainWindowView: View {
         }
 
         DispatchQueue.global(qos: .userInitiated).async {
+            // Only loads local environments' secrets; 1Password-backed envs are
+            // fetched lazily when selected (see loadSelectedEnvironmentSecrets).
             let loadedSecrets = Vault0Library.shared.listSecrets(vaultId: vaultId, environment: nil)
             let loadedEnvItems = Vault0Library.shared.listEnvironmentItems(vaultId: vaultId)
 
@@ -224,13 +232,48 @@ struct MainWindowView: View {
                 secrets = loadedSecrets
                 environmentItems = loadedEnvItems
                 vaultEnvironments = loadedEnvItems.map(\.name)
-                isLoading = false
 
                 if !vaultEnvironments.contains(selectedEnvironment), let firstEnv = vaultEnvironments.first {
                     selectedEnvironment = firstEnv
                 }
 
+                loadSelectedEnvironmentSecrets()
+
                 NSLog("Loaded \(secrets.count) secrets and \(vaultEnvironments.count) environments for vault \(vaultId)")
+            }
+        }
+    }
+
+    /// Fetches secrets for the selected environment if it is 1Password-backed
+    /// (shelling out to `op`), showing the loading view while it runs. Local
+    /// environments already have their secrets from the bulk load, so this is a
+    /// no-op for them.
+    private func loadSelectedEnvironmentSecrets() {
+        guard let vaultId = selectedVaultId else { return }
+
+        let env = selectedEnvironment
+        guard
+            let item = environmentItems.first(where: { $0.name == env }),
+            item.isOnePassword
+        else {
+            isLoading = false
+            return
+        }
+
+        opLoadToken += 1
+        let token = opLoadToken
+        isLoading = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let resolved = Vault0Library.shared.listSecrets(vaultId: vaultId, environment: env)
+            let own = resolved.filter { $0.environment.lowercased() == env.lowercased() }
+
+            DispatchQueue.main.async {
+                // Ignore stale results if the selection changed meanwhile.
+                guard token == opLoadToken, selectedEnvironment == env else { return }
+                secrets.removeAll { $0.environment.lowercased() == env.lowercased() }
+                secrets.append(contentsOf: own)
+                isLoading = false
             }
         }
     }
@@ -381,6 +424,7 @@ struct SidebarEnvironmentSection: View {
                         title: env,
                         depth: depth(for: env),
                         isSelected: selectedEnvironment == env,
+                        isOnePassword: isOnePassword(env),
                         action: { selectedEnvironment = env },
                     )
                 }
@@ -427,6 +471,10 @@ struct SidebarEnvironmentSection: View {
         return result
     }
 
+    private func isOnePassword(_ name: String) -> Bool {
+        environmentItems.first { $0.name == name }?.isOnePassword ?? false
+    }
+
     private func depth(for name: String) -> Int {
         let byId = Dictionary(uniqueKeysWithValues: environmentItems.map { ($0.id, $0) })
         var current = environmentItems.first { $0.name == name }
@@ -445,14 +493,23 @@ struct SidebarEnvironmentButton: View {
     let title: String
     var depth: Int = 0
     let isSelected: Bool
+    var isOnePassword: Bool = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: depth > 0 ? "arrow.turn.down.right" : "server.rack")
-                    .font(.system(size: 12))
-                    .frame(width: 16)
+                if isOnePassword {
+                    Image("onepassword")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .help("Backed by 1Password")
+                } else {
+                    Image(systemName: depth > 0 ? "arrow.turn.down.right" : "server.rack")
+                        .font(.system(size: 12))
+                        .frame(width: 16)
+                }
                 Text(title)
                     .font(.system(size: 13))
                 Spacer()

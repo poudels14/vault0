@@ -53,17 +53,30 @@ struct EnvironmentItem: Codable, Identifiable {
     let createdAt: Int64
     let displayOrder: Int64
     let parentId: String?
+    let opVault: String?
+    let opItem: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case createdAt = "created_at"
         case displayOrder = "display_order"
         case parentId = "parent_id"
+        case opVault = "op_vault"
+        case opItem = "op_item"
     }
 
     var createdDate: Date {
         Date(timeIntervalSince1970: TimeInterval(createdAt))
     }
+
+    var isOnePassword: Bool {
+        opItem != nil
+    }
+}
+
+struct OpEntry: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
 }
 
 struct ApiKey: Codable, Identifiable {
