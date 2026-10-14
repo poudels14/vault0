@@ -20,9 +20,13 @@ use vault0::rpc::{
 const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
 #[derive(Parser)]
-#[command(name = "vault0")]
+#[command(name = "vault0", version, disable_version_flag = true)]
 #[command(about = "A CLI for managing vault0 secrets", long_about = None)]
 struct Cli {
+    /// Print version
+    #[arg(short = 'v', long, action = clap::ArgAction::Version)]
+    version: (),
+
     #[command(subcommand)]
     command: Commands,
 }
