@@ -657,11 +657,15 @@ async fn run_command(command: &[String]) -> Result<()> {
     cmd.arg("-c").arg(&command.join(" "));
 
     for secret in &secrets {
-        cmd.env(&secret.key, &secret.value);
+        cmd.env(&secret.key, expand_escaped_newlines(&secret.value));
     }
 
     let err = cmd.exec();
     Err(anyhow!("Failed to exec: {}", err))
+}
+
+fn expand_escaped_newlines(value: &str) -> String {
+    value.replace("\\n", "\n").replace("\\r", "\r")
 }
 
 async fn open_shell() -> Result<()> {
