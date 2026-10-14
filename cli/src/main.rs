@@ -7,6 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use base64::Engine;
 use clap::{Parser, Subcommand};
 use dialoguer::{Input, MultiSelect, Password, Select};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tarpc::{client, context};
 use tokio::net::UnixStream;
@@ -318,10 +319,8 @@ async fn import_env_file(file_path: &str) -> Result<()> {
         return Err(anyhow!("File not found: {}", file_path));
     }
 
-    let env_vars: HashMap<String, String> = dotenvy::from_path_iter(path)
-        .map_err(|e| anyhow!("Failed to read .env file: {}", e))?
-        .filter_map(|item| item.ok())
-        .collect();
+    let content = std::fs::read_to_string(path).context("Failed to read .env file")?;
+    let env_vars = parse_env(&content);
 
     if env_vars.is_empty() {
         return Err(anyhow!("No variables found in .env file"));
@@ -349,6 +348,31 @@ async fn import_env_file(file_path: &str) -> Result<()> {
     );
 
     Ok(())
+}
+
+fn parse_env(content: &str) -> HashMap<String, String> {
+    let line = Regex::new(
+        r#"(?m)^\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?$"#,
+    )
+    .expect("valid regex");
+    let content = content.replace("\r\n", "\n").replace('\r', "\n");
+
+    line.captures_iter(&content)
+        .map(|caps| {
+            let raw = caps.get(2).map_or("", |m| m.as_str()).trim();
+            let quote = raw.chars().next().filter(|c| matches!(c, '\'' | '"' | '`'));
+            let value = match quote {
+                Some(q) if raw.len() > 1 && raw.ends_with(q) => &raw[1..raw.len() - 1],
+                _ => raw,
+            };
+            let value = if quote == Some('"') {
+                expand_escaped_newlines(value)
+            } else {
+                value.to_string()
+            };
+            (caps[1].to_string(), value)
+        })
+        .collect()
 }
 
 fn format_env_value(value: &str) -> String {

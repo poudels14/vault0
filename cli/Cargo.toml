@@ -15,7 +15,7 @@ anyhow = "1.0"
 base64 = "0.22"
 vault0 = { path = "../lib" }
 dialoguer = "0.11"
-dotenvy = "0.15"
+regex = "1"
 tarpc = { version = "0.35", features = ["tokio1", "serde-transport"] }
 tokio = { version = "1.42", features = ["rt", "macros", "net"] }
 tokio-util = { version = "0.7", features = ["codec"] }
