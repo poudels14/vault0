@@ -351,13 +351,21 @@ async fn import_env_file(file_path: &str) -> Result<()> {
     Ok(())
 }
 
-fn escape_env_value(value: &str) -> String {
-    let escaped = value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('$', "\\$")
-        .replace('`', "\\`");
-    format!("\"{}\"", escaped)
+fn format_env_value(value: &str) -> String {
+    let value = expand_escaped_newlines(value);
+    if !value.contains('\'') {
+        format!("'{}'", value)
+    } else if !value.contains(['"', '\\', '$']) {
+        format!("\"{}\"", value)
+    } else if !value.contains('`') {
+        format!("`{}`", value)
+    } else {
+        let escaped = value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$");
+        format!("\"{}\"", escaped)
+    }
 }
 
 async fn export_env_file(file_path: &str) -> Result<()> {
@@ -375,7 +383,7 @@ async fn export_env_file(file_path: &str) -> Result<()> {
         content.push_str(&format!(
             "{}={}\n",
             secret.key,
-            escape_env_value(&secret.value)
+            format_env_value(&secret.value)
         ));
     }
 
